@@ -2,7 +2,7 @@
 
 - Status: corrected probes accepted locally; WP01 remains blocked until Vera and Hagen recommend the same correction commit
 - Date: 2026-11-15
-- Scope: HUM-271 / WP00, corrected by HUM-276
+- Scope: HUM-271 / WP00, corrected by HUM-276 and HUM-279
 
 ## Decision summary
 
@@ -11,8 +11,8 @@ Version 1 targets the locally running Paperclip host at commit `c645b7795b5665ea
 The M365 plugin will use these authenticated seams:
 
 - Agent calls: manifest-declared plugin tools. Identity is taken only from host-validated `ToolRunContext`; identity-like JSON fields are ignored.
-- Human administration and mutation approval: `performAction` through the authenticated plugin action bridge. The worker requires `context.actor.type === "user"`, a non-null host-derived `userId`, the expected company, and a current plugin approver assignment.
-- Approval binding: an action carries only an `operationId`. The worker loads the immutable operation snapshot from its database namespace, verifies company, Microsoft connection, requesting agent, policy version, expiry, target and full payload hash, and atomically records the authenticated human decision. A later execution uses exactly that stored snapshot.
+- Human administration and mutation approval: `performAction` through the authenticated plugin action bridge is the selected implementation seam. WP00 verifies that the SDK action harness supplies an actor context and that reservation can require `context.actor.type === "user"`, a non-null host-derived `userId`, the expected company and a current plugin approver assignment; it does not prove persistence of a real human decision.
+- Approval binding: an action will carry only an `operationId`. WP00 proves immutable snapshot binding and a single-statement reservation after company, connection, agent, policy, expiry, target, payload-hash and current-right checks. The real plugin must add the actual decision record and a separate executor in WP03 before any Graph mutation.
 - Persistence: the host-derived plugin database namespace through `ctx.db.query`/`ctx.db.execute`; no table name or company is accepted as an authorization decision from caller JSON.
 - Version-1 file transport: Base64 inside the ordinary tool/action JSON contract, capped at 4 MiB raw bytes before Graph I/O. The scoped plugin API is not used for file content.
 
@@ -83,12 +83,17 @@ pwsh -NoProfile -File .\experiments\wp00\run.ps1 -PaperclipSource ..\paperclip
 
 The corrected synthetic probe passed 20 assertions against a fresh loopback-only PostgreSQL 17 cluster. It uses the SDK action harness, the public `ctx.db.query`/`ctx.db.execute` interface, the host's actual runtime SQL validators and PostgreSQL's real affected-row count. It proves:
 
-- the stored immutable snapshot binds company, connection, requesting agent, approving user, action, target, complete canonical payload, policy, required permission, creation, expiry and state;
-- two parallel approvals produce exactly one `rowCount === 1` winner; replay, foreign company, altered connection/agent/policy/target/payload, expiry and revoked agent or approver rights are rejected;
-- preview and execution return the identical stored canonical payload and SHA-256;
+- the stored immutable synthetic snapshot binds company, connection, requesting agent, expected approver, action, target, complete canonical payload, policy, required permission, creation, expiry and state;
+- the action-harness actor and current agent/approver rights are checked when reserving;
+- two parallel reservations produce exactly one `rowCount === 1` transition from `pending` to `executing`; replay, foreign company, altered connection/agent/policy/target/payload, expiry and revoked rights are rejected;
+- preview and reservation return the identical stored canonical payload and SHA-256;
 - a mutation injected between load and reservation loses the conditional update;
 - `unknown` survives a fresh harness and fresh database connection over the same persistent row and cannot be automatically reserved again;
 - Base64 boundaries 0, 1, 4 MiB minus 1, exactly 4 MiB and 4 MiB plus 1, plus invalid characters, padding and pad bits, behave as specified.
+
+WP00 does not prove persistence of the actual actor ID, decision, decision time or audit correlation; a separate executor stage; `succeeded`/`failed` terminal paths; or a Graph mutation. In particular, the probe's action named `approve-operation` is a reservation harness, not evidence of a complete approval/audit workflow or of later execution of the same snapshot.
+
+Before any mutating Graph feature, WP03 must prove in the real plugin that actor ID, decision, decision timestamp and audit correlation are persisted atomically; that only `approved` may be reserved once into `executing`; and that a separate executor loads only the reserved immutable snapshot. The allowed lifecycle is `pending -> approved|rejected|expired|invalidated`, `approved -> executing`, and `executing -> succeeded|failed|unknown`. Tests must cover exactly one executor, replay, crash/restart, all three terminal outcomes, rights revocation and payload manipulation. `unknown` is never retried automatically. Audit and state must share one demonstrated atomic path, or a demonstrated fail-closed compensation must prevent execution when audit persistence is uncertain.
 
 `host-gateway-probe.ps1` is now offline-only. It has one fixed local synthetic echo identifier and checks risk, side-effect, data-class and transport metadata before a dispatch could be formed. The passing result reports zero network calls and zero dispatches, while arbitrary tool ID, write risk, side effects, real data and remote transport all fail closed.
 
@@ -137,10 +142,10 @@ The encoded 4-MiB value is 5,592,408 ASCII characters, below the host's 10-MB JS
 - Same-origin UI code is trusted code. A UI check never replaces worker authorization.
 - Tool gateway identity binding does not replace the plugin's connection/action/resource authorization.
 - Device Code may be disabled by the target tenant. That is a WP02 external prerequisite, not a reason to silently choose another flow.
-- WP03 must repeat CAS, replay, restart and persistent-`unknown` evidence in the actual plugin persistence layer.
-- WP04, WP10 and WP11 require content-free metrics, named thresholds, an alert path and an exercised runbook.
+- WP03 must implement and prove the complete approval/audit/executor lifecycle above in the actual plugin persistence layer; WP00 is only reservation evidence.
+- WP04, WP10 and WP11 require the binding content-free signal inventory, label/cardinality limits, named thresholds, alert path, dashboard evidence, privacy review and an exercised runbook defined in the work packages.
 - WP08 must prove boundary sizes, parallel behavior, peak RSS, timeout and rate-limit enforcement before external file I/O is accepted.
-- Before installation or migration, WP11 requires a version-bound preflight, backup/restore proof, additive migration, observation window and ordered rollback.
+- Before installation or migration, WP11 requires the version-bound nine-step runbook, backup/restore proof, additive migration, observation window and stop/rollback criteria defined in the work packages.
 - Microsoft and installed-plugin integration behavior remains unverified until WP02/WP10.
 
 ## Updated remaining estimate
@@ -164,7 +169,7 @@ Including approximately 2 PT spent on WP00, the revised version-1 estimate is 33
 
 ## Delivery state and rollback
 
-- Implemented: repository decision, self-verifying fingerprint, persistent synthetic SQL/CAS probe, strict file contract, offline gateway contract and updated operating gates.
+- Implemented: repository decision, self-verifying fingerprint, persistent synthetic SQL/CAS reservation probe, strict file contract, offline gateway contract and updated operating gates. Human-decision/audit persistence and a separate executor remain unimplemented WP03 gates.
 - Locally tested: yes, against the exact fingerprinted SDK source and a disposable local PostgreSQL cluster; 20/20 contract assertions passed.
 - Integrated with the running Paperclip host: no current acceptance claim. The original live observation is historical only and was removed from the corrected safety evidence. An installed M365 plugin was not tested; that is out of WP00 scope.
 - Tested with a real Microsoft account: no; prohibited in WP00.

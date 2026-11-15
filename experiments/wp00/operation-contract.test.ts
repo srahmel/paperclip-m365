@@ -218,7 +218,7 @@ test("a manipulated file snapshot is rejected before persistence", async () => {
   await assert.rejects(contract.prepare(value), /file metadata mismatch/);
 });
 
-test("preview and execution use the identical persistent snapshot", async () => {
+test("preview and reservation return the identical persistent snapshot", async () => {
   const { harness, contract } = createActionHarness();
   const { operation } = await prepareReady(contract);
   const preview = await harness.performAction("preview-operation", { operationId: operation.operationId }, {
@@ -231,7 +231,7 @@ test("preview and execution use the identical persistent snapshot", async () => 
   assert.equal(reserved.payloadHash, preview.payloadHash);
 });
 
-test("one SQL CAS wins under parallel approval and replay is rejected", async () => {
+test("one SQL CAS wins under parallel reservation and replay is rejected", async () => {
   const { harness, contract } = createActionHarness();
   const { operation } = await prepareReady(contract);
   const results = await Promise.allSettled([

@@ -22,11 +22,14 @@ The runner then creates a fresh PostgreSQL cluster below the run scratch directo
 
 ## Covered contracts
 
-- a complete canonical snapshot binding company, Microsoft connection, requesting agent, approving user, action, target, policy, required permission, timestamps, state and file content;
-- one conditional SQL `UPDATE`/`rowCount` reservation, one winner under parallel approval, replay denial, current permission and approver checks, expiry, TOCTOU rejection, and persistent `unknown` across a fresh harness and database connection;
-- preview and execution returning the identical stored canonical payload and hash;
+- a complete canonical synthetic snapshot binding company, Microsoft connection, requesting agent, expected approver, action, target, policy, required permission, timestamps, state and file content;
+- an authenticated action-harness actor plus current approver/agent-right checks at reservation time;
+- one conditional SQL `UPDATE`/`rowCount` reservation from `pending` to `executing`, one winner under parallel reservation, replay denial, expiry, TOCTOU rejection, and persistent `unknown` across a fresh harness and database connection;
+- preview and the reservation result returning the identical stored canonical payload and hash;
 - strict Base64 cases for 0, 1, 4 MiB minus 1, exactly 4 MiB, 4 MiB plus 1, invalid characters, missing or excess padding, non-zero pad bits and a tampered snapshot;
 - full-payload SHA-256 binding of action, target, identities, policy and content.
+
+This probe deliberately does **not** prove that a real plugin atomically persists the actual human actor ID, decision, decision timestamp and audit correlation. It also does not implement a separately scheduled executor, `succeeded`/`failed` terminal paths or any Graph mutation. Those are hard WP03 acceptance gates: the real plugin must persist the decision and audit correlation, reserve exactly one executor, and have that executor load only the reserved immutable snapshot. Tests must cover replay, crash/restart, rights revocation, payload manipulation and every terminal outcome, with no automatic retry from `unknown`.
 
 Canonical syntax, encoded length and exact decoded length are checked before `Buffer.from`. The post-decode byte length and canonical round trip are checked again. A 4-MiB value temporarily exists both as about 5.59 MiB of UTF-16 JavaScript text and as a 4-MiB `Buffer`; concurrent requests multiply that pressure. WP08 must measure peak RSS and establish concurrency, timeout and rate-limit gates before OneDrive is accepted.
 
