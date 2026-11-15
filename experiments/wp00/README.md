@@ -4,7 +4,8 @@ This experiment is an offline, synthetic proof of the Paperclip contracts select
 
 ## Prerequisites and exact command
 
-- the Paperclip checkout and installed dependencies described by `expected-host-fingerprint.json`;
+- the clean Paperclip checkout and installed dependencies described by `expected-host-fingerprint.json`;
+- an `npm ci` restoration of `registry-pin/package-lock.json` when the published SDK artifact is tested;
 - Node.js `24.22.1` and the pinned `tsx` `4.23.15` CLI from that checkout;
 - local PostgreSQL 17 commands `initdb` and `pg_ctl` on `PATH`.
 
@@ -12,11 +13,12 @@ Run from this repository root on Windows:
 
 ```powershell
 pwsh -NoProfile -File .\experiments\wp00\run.ps1 `
-  -PaperclipSource ..\paperclip `
+  -PaperclipSource F:\tmp\hum282-pin\src `
+  -SdkPackageRoot F:\tmp\hum282-registry\node_modules\@paperclipai\plugin-sdk `
   -TestTimeoutSeconds 120
 ```
 
-Before starting any test, `verify-host-fingerprint.ps1` recomputes and emits compact JSON for the exact commit, tracked-diff object hash, relevant host/SDK/Shared file hashes, Node and SDK assumptions, and the exact `tsx` package and CLI. Any mismatch exits non-zero. `git describe` is informational only. The runner does not search for or lexicographically select another `tsx` version.
+Before starting any test, `verify-host-fingerprint.ps1` recomputes and emits compact JSON for the repository, tag, commit, tree, clean tracked-diff object hash, source-lock SHA-256, npm lock and registry integrities, relevant host/SDK/Shared file hashes, Node and SDK assumptions, and the exact `tsx` package and CLI. Any mismatch exits non-zero. `git describe` is informational only. The runner does not search for or lexicographically select another `tsx` version. The complete restoration recipe and evidence are in [the WP01 pin report](../../docs/wp01-sdk-shared-pin.md).
 
 The runner then creates a fresh PostgreSQL cluster below the run scratch directory, listens only on loopback with synthetic trust authentication, executes the tests, stops PostgreSQL, and removes the verified temporary directory. The test adapter implements the public `ctx.db.query`/`ctx.db.execute` seam, runs the host's actual SQL validators, and returns PostgreSQL's real affected-row count.
 

@@ -1,6 +1,6 @@
 # Arbeitspakete für das Microsoft 365 Plugin
 
-Stand: 15. November 2026. Die bestätigten Anforderungen sind eigene und gemeinsam genutzte Kontoverbindungen sowie Softeria als Funktionsreferenz. Diese Pakete beschreiben die Umsetzung; sie sind noch nicht umgesetzt oder als Aufgaben an Agenten verteilt.
+Stand: 16. November 2026. Die bestätigten Anforderungen sind eigene und gemeinsam genutzte Kontoverbindungen sowie Softeria als Funktionsreferenz. Diese Pakete beschreiben die Umsetzung; sie sind noch nicht umgesetzt oder als Aufgaben an Agenten verteilt.
 
 Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen schließen die jeweilige Dokumentation und gezielte Tests ein. Die Summe enthält die Pflichtpakete, jedoch keine administrativen Wartezeiten und keine optionalen Erweiterungen.
 
@@ -9,7 +9,7 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 | Paket | Ergebnis | Abhängigkeit | Aufwand |
 | --- | --- | --- | --- |
 | WP00 | Geprüfter Paperclip-Vertrag und Architekturentscheidungen | Keine | ca. 2 PT, korrigierter Stand wartet auf Doppelreview |
-| WP01 | Plugin-Grundgerüst, Build und CI | WP00 sowie Vera-/Hagen-Empfehlung auf demselben Commit | 2 bis 3 PT |
+| WP01 | Plugin-Grundgerüst, Build und CI | WP00 sowie Vera-/Hagen-Empfehlung auf demselben Commit | 1 bis 2 PT verbleibend; Pin-Gate lokal grün |
 | WP02 | Microsoft-Anmeldung und verschlüsselter Token-Cache | WP01 | 4 bis 6 PT |
 | WP03 | Agentenrechte und konkrete Änderungsfreigaben | WP01, WP00 | 4 bis 6 PT |
 | WP04 | Graph-Transport, Fehlerbehandlung, Pagination und Betriebsmetriken | WP01 | 3 bis 4 PT |
@@ -20,8 +20,8 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 | WP09 | Vollständige Paperclip-Verwaltungsoberfläche | WP02, WP03, WP05 bis WP08 | 3 bis 4 PT |
 | WP10 | Unabhängige Reviews, Betriebsprüfung und Abnahmetests | WP05 bis WP09 | 4 bis 5 PT |
 | WP11 | Gepacktes Release, Migrations-/Rollbacknachweis und begrenzter Pilot | WP10 | 2 bis 5 PT |
-| Rest | WP01 bis WP11 | korrigiertes WP00 doppelt empfohlen | 31 bis 47 PT |
-| Gesamt | Version 1 einschließlich WP00 | WP00 bis WP11 | 33 bis 49 PT |
+| Rest | WP01 bis WP11 | Pin-Gate wartet auf Doppelreview | 30 bis 46 PT |
+| Gesamt | Version 1 einschließlich bereits erbrachter Nachweise | WP00 bis WP11 | 33 bis 49 PT |
 
 ## WP00 Paperclip und Microsoft Verträge prüfen
 
@@ -40,6 +40,8 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 **Arbeit:** Vor Featurecode einen sauber erhältlichen SDK-/Shared-Pin mit Lock- und Integritätsnachweis herstellen und den vollständigen selbstprüfenden WP00-Probe gegen diesen sauberen Stand erneut ausführen. Erst danach Plugin-ID und Paketnamen prüfen, Scaffold übernehmen, Build für Worker und UI konfigurieren sowie Dependency- und Secret-Prüfung ergänzen. Lizenz für den eigenen Code festlegen; Übernahmen aus Softeria getrennt kennzeichnen. Beispielkonfiguration enthält ausschließlich Platzhalter.
 
 **Abnahme:** Der SDK-/Shared-Pin ist aus einer dokumentierten Quelle frisch erhältlich, Lockfile und Prüfsummen sind nachvollziehbar und der Fingerprint-/Vertragsprobe ist vor dem ersten Featurecode grün. Danach laufen Typecheck, gezielte Tests und Build in einer frischen Umgebung. Ein `npm pack`-Artefakt enthält die benötigten Ausgaben und keine lokalen Konfigurationen, Sitzungen oder Token-Dateien. Installation und Disable/Enable funktionieren in einer isolierten Testinstanz auf Windows und Linux.
+
+**Stand Pin-Gate:** Der [WP01A-Pin-Nachweis](wp01-sdk-shared-pin.md) bindet SDK und Shared `2026.1106.0`, den sauberen öffentlichen Source-Commit, beide Lockpfade und Registry-Integritäten. Frische Wiederherstellung, Fingerprint, PostgreSQL 20/20, Offline-Gateway, Typecheck und SDK 28/28 sind lokal grün. Feature-/Scaffold-Arbeit bleibt bis zu Vera-/Hagen-Empfehlungen auf exakt demselben Commit gesperrt.
 
 ## WP02 Anmeldung und Kontoverbindungen
 

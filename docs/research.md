@@ -1,10 +1,10 @@
 # Recherche zu Paperclip und Microsoft 365
 
-Stand: 15. November 2026. Die folgenden Primärquellen begründen den Architekturplan. Dokumentierte API-Verfügbarkeit ist von einem erfolgreichen Test in einer konkreten Paperclip-Instanz und einem konkreten Microsoft-Tenant zu unterscheiden.
+Stand: 16. November 2026. Die folgenden Primärquellen begründen den Architekturplan. Dokumentierte API-Verfügbarkeit ist von einem erfolgreichen Test in einer konkreten Paperclip-Instanz und einem konkreten Microsoft-Tenant zu unterscheiden.
 
 ## Paperclip
 
-Die lokale Quellprüfung erfolgte auf Paperclip-Commit `c645b7795b5665eaafb3a30fe23e2deb0811dc6e`. WP00 hat diesen Stand inzwischen geprüft: Version `2026.1106.0+131.git.c645b7795b.dirty`, Node.js `24.22.1`, SDK-Quellversion `1.0.0`. Weil der Host-Checkout bereits fremde Änderungen enthielt, hält [ADR 0001](decisions/0001-paperclip-runtime-contracts.md) zusätzlich relevante Dateihashes, tracked Diff-Fingerprint und den exakt verwendeten `tsx`-Runner fest; der Probe berechnet diese Werte vor jedem Lauf selbst und scheitert bei Abweichung. Dieser lokale Commit ist im öffentlichen Upstream nicht verfügbar und deshalb kein sauber erhältlicher WP01-Pin. Die älteren öffentlichen Quellverweise unten bleiben auf Commit `304e40fe9c6dde1d273710c30c137f62f1db4593` festgelegt; vor WP01-Featurecode ist ein sauberer SDK-/Shared-Pin mit Lock-/Integritätsnachweis und Wiederholungsprobe erforderlich.
+WP00 prüfte ursprünglich den lokalen Dirty-Host `c645b7795b5665eaafb3a30fe23e2deb0811dc6e`; dieser Stand bleibt historische Beobachtung, ist aber kein WP01-Pin. WP01A bindet nun den sauberen öffentlichen Commit `d69631b01b9c658f80bf8bed389863dce82643e1` aus Tag `v2026.1106.0`, dessen Frozen-Lockfile sowie die veröffentlichten Registry-Artefakte `@paperclipai/plugin-sdk@2026.1106.0` und `@paperclipai/shared@2026.1106.0`. Fingerprint, Registry-Wiederherstellung, PostgreSQL 20/20, Offline-Gateway, Typecheck und SDK 28/28 sind grün; Quellen, Integritäten und Grenzen stehen im [WP01-Pin-Nachweis](wp01-sdk-shared-pin.md).
 
 | Quelle | Nachgewiesener Vertrag | Folgerung für den Plan |
 | --- | --- | --- |

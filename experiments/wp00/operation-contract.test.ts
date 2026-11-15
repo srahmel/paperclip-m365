@@ -16,11 +16,15 @@ import {
 } from "./operation-contract.js";
 
 const paperclipSource = process.env.PAPERCLIP_SOURCE;
+const sdkPackageRoot = process.env.WP00_SDK_PACKAGE_ROOT;
 const databaseUrl = process.env.WP00_DATABASE_URL;
 assert(paperclipSource, "PAPERCLIP_SOURCE must point to the fingerprinted Paperclip checkout");
 assert(databaseUrl, "WP00_DATABASE_URL must point to the isolated probe database");
 
-const sdk = await import(pathToFileURL(resolve(paperclipSource, "packages/plugins/sdk/src/index.ts")).href);
+const sdkEntry = sdkPackageRoot
+  ? resolve(sdkPackageRoot, "dist/index.js")
+  : resolve(paperclipSource, "packages/plugins/sdk/src/index.ts");
+const sdk = await import(pathToFileURL(sdkEntry).href);
 const databaseContract = await import(
   pathToFileURL(resolve(paperclipSource, "server/src/services/plugin-database.ts")).href
 );

@@ -1,6 +1,8 @@
 param(
     [string]$PaperclipSource = (Join-Path $PSScriptRoot '..\..\..\paperclip'),
 
+    [string]$SdkPackageRoot,
+
     [int]$TestTimeoutSeconds = 120
 )
 
@@ -16,6 +18,16 @@ $expectation = Get-Content -Raw -LiteralPath $expectationPath | ConvertFrom-Json
 $tsx = Join-Path $resolvedSource $expectation.runner.relativeCliPath
 if (-not (Test-Path -LiteralPath $tsx -PathType Leaf)) {
     throw "Pinned tsx runner is missing: $($expectation.runner.relativeCliPath)"
+}
+
+$resolvedSdkPackageRoot = $null
+if ($SdkPackageRoot) {
+    $resolvedSdkPackageRoot = (Resolve-Path -LiteralPath $SdkPackageRoot).Path
+    $publishedSdkPackage = Get-Content -Raw -LiteralPath (Join-Path $resolvedSdkPackageRoot 'package.json') | ConvertFrom-Json
+    if ($publishedSdkPackage.name -cne $expectation.sdk.name -or
+        $publishedSdkPackage.version -cne $expectation.sdk.publishedVersion) {
+        throw "Published SDK package mismatch: $($publishedSdkPackage.name)@$($publishedSdkPackage.version)"
+    }
 }
 
 $initdb = (Get-Command initdb -ErrorAction Stop).Source
@@ -36,6 +48,7 @@ $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
 $listener.Stop()
 
 $env:PAPERCLIP_SOURCE = $resolvedSource
+if ($resolvedSdkPackageRoot) { $env:WP00_SDK_PACKAGE_ROOT = $resolvedSdkPackageRoot }
 $testExit = 1
 try {
     & $initdb -D $dataDir -U wp00_probe -A trust --encoding=UTF8 --no-locale
@@ -50,6 +63,7 @@ try {
     $testExit = $LASTEXITCODE
 } finally {
     Remove-Item Env:WP00_DATABASE_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:WP00_SDK_PACKAGE_ROOT -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $dataDir) {
         & $pgCtl -D $dataDir stop -m fast
     }
@@ -68,6 +82,7 @@ try {
     status = if ($testExit -eq 0) { 'pass' } else { 'fail' }
     database = 'isolated-temporary-postgresql'
     externalIo = $false
+    sdkUnderTest = if ($resolvedSdkPackageRoot) { "$($expectation.sdk.name)@$($expectation.sdk.publishedVersion) registry artifact" } else { 'fingerprinted source SDK' }
     testFile = 'experiments/wp00/operation-contract.test.ts'
     timeoutSeconds = $TestTimeoutSeconds
 } | ConvertTo-Json -Compress

@@ -1,12 +1,12 @@
 # ADR 0001: Paperclip runtime contracts for the M365 plugin
 
-- Status: corrected probes accepted locally; WP01 remains blocked until Vera and Hagen recommend the same correction commit
-- Date: 2026-11-15
-- Scope: HUM-271 / WP00, corrected by HUM-276 and HUM-279
+- Status: clean WP01 pin and repeated probes accepted locally; feature scaffold remains blocked until Vera and Hagen recommend the same pin commit
+- Date: 2026-11-16
+- Scope: HUM-271 / WP00, corrected by HUM-276 and HUM-279; clean pin added by HUM-282
 
 ## Decision summary
 
-Version 1 targets the locally running Paperclip host at commit `c645b7795b5665eaafb3a30fe23e2deb0811dc6e`, reported by `/api/health` as `2026.1106.0+131.git.c645b7795b.dirty`, with `@paperclipai/plugin-sdk` source version `1.0.0` and Node.js `>=24.11.0`. The observed process uses Node.js `24.22.1` directly from the local checkout.
+Version 1 targets the clean public Paperclip source tag `v2026.1106.0` at commit `d69631b01b9c658f80bf8bed389863dce82643e1`, the published packages `@paperclipai/plugin-sdk@2026.1106.0` and `@paperclipai/shared@2026.1106.0`, and Node.js `>=24.11.0`. The repeated local probe used Node.js `24.22.1`. The earlier running Dirty-Host observation at `c645b7795b5665eaafb3a30fe23e2deb0811dc6e` remains historical compatibility context, not the distributable pin.
 
 The M365 plugin will use these authenticated seams:
 
@@ -20,7 +20,15 @@ Native Paperclip company approvals are not the execution contract. This SDK expo
 
 ## Verified host and SDK fingerprint
 
-The running host checkout was already dirty before WP00. WP00 did not modify it. The contract baseline is therefore commit plus observed version plus relevant file hashes, not the commit alone. `experiments/wp00/expected-host-fingerprint.json` is the versioned source of truth. The probe recomputes every value before any contract test, emits the result as JSON and fails closed on a mismatch.
+### Current clean WP01 pin
+
+`experiments/wp00/expected-host-fingerprint.json` is now the versioned source of truth for the clean pin. It requires the public repository and tag, commit `d69631b01b9c658f80bf8bed389863dce82643e1`, tree `1955a72d50a89ef05295791948b78c93e36615a6`, an empty tracked diff, `pnpm@9.15.4`, source-lock SHA-256 `242f0f08eb06fb2add28773f85a91d5e00a7ff8d71288d2d12a1163bee62d4e5`, the exact registry integrities and all relevant file/runner hashes. `experiments/wp00/registry-pin/package-lock.json` locks SDK, Shared, zod and three. The full table, restoration commands and results are in [WP01A: reproduzierbarer Paperclip-SDK-/Shared-Pin](../wp01-sdk-shared-pin.md).
+
+The source manifests retain internal versions `1.0.0` and `0.3.1`, while the registry release rewrites both packages to `2026.1106.0`. The probe checks both identities separately and executes the 20 contract assertions with the installed registry SDK artifact.
+
+### Historical Dirty-Host observation
+
+The running host checkout was already dirty before WP00. WP00 did not modify it. Its historical contract baseline therefore required commit plus observed version plus relevant file hashes, not the commit alone. The values below preserve that original observation; the current `experiments/wp00/expected-host-fingerprint.json` has superseded them with the clean WP01 pin above.
 
 | Item | Observed value |
 | --- | --- |
@@ -57,7 +65,7 @@ The pre-existing tracked modifications hash to:
 - `packages/shared/src/connection-intent-guidance.ts`: `cbc6ef59ddf028472c4055495d511ac77e800f930fcb5360ed312503d128961a`
 - `server/src/index.ts`: `596e8d824f24499d3a811141ce1d89e7cac8ebf866c39cf02d4c49a3fa1f9057`
 
-WP01's first gate is an obtainable clean SDK/Shared artifact with a lock/integrity proof and a repeated green fingerprint/contract probe. No feature code starts before that gate. The string `1.0.0` alone and the current dirty local checkout are not sufficient pins.
+WP01's first gate is locally complete: the obtainable SDK/Shared artifacts, lock/integrity proof and repeated green fingerprint/contract probe are recorded above. No feature code starts until Vera and Hagen independently recommend the exact resulting repository commit. The string `1.0.0` alone and the historical dirty local checkout remain insufficient pins.
 
 ## Contract findings
 
@@ -78,7 +86,9 @@ The plugin UI is trusted same-origin code, not a security boundary. Every decisi
 Run:
 
 ```powershell
-pwsh -NoProfile -File .\experiments\wp00\run.ps1 -PaperclipSource ..\paperclip
+pwsh -NoProfile -File .\experiments\wp00\run.ps1 `
+  -PaperclipSource F:\tmp\hum282-pin\src `
+  -SdkPackageRoot F:\tmp\hum282-registry\node_modules\@paperclipai\plugin-sdk
 ```
 
 The corrected synthetic probe passed 20 assertions against a fresh loopback-only PostgreSQL 17 cluster. It uses the SDK action harness, the public `ctx.db.query`/`ctx.db.execute` interface, the host's actual runtime SQL validators and PostgreSQL's real affected-row count. It proves:
@@ -101,7 +111,7 @@ The earlier live request through `srahmel.personal-todo:list_tasks` did dispatch
 
 Upstream evidence on the same source state:
 
-- SDK baseline from the original WP00 state: `testing-actions.test.ts` and `worker-rpc-host.test.ts`: 28/28 passed. The corrected probe additionally imports and validates the exact same fingerprinted SDK source.
+- SDK baseline on the clean source pin: `testing-actions.test.ts` and `worker-rpc-host.test.ts`: 28/28 passed. The repeated PostgreSQL probe imports the separately `npm ci`-installed, integrity-checked SDK `2026.1106.0` artifact.
 - Host: two tool-scope tests passed; the actor-context test initially exceeded the repository's 15-second test budget during cold transform, then passed in 20.943 seconds with a 30-second budget. This was a test-runner timing failure, not an assertion failure.
 
 These checks do not claim a locally installed M365 plugin. Installation is explicitly deferred to WP01/WP10.
@@ -152,7 +162,7 @@ The encoded 4-MiB value is 5,592,408 ASCII characters, below the host's 10-MB JS
 
 | Package | Revised estimate | Change driver |
 | --- | --- | --- |
-| WP01 | 2-3 PT | clean reproducible SDK/Shared pin, worker/UI build and repeatable contract probe |
+| WP01 | 1-2 PT remaining | clean reproducible SDK/Shared pin and repeatable contract probe are locally complete; worker/UI build and package checks remain |
 | WP02 | 4-6 PT | tenant prerequisite, MSAL flow decision and encrypted concurrent token cache |
 | WP03 | 4-6 PT | private immutable operation store, authenticated action approval and atomic execution |
 | WP04 | 3-4 PT | curated Graph transport, redirect/error guards, content-free metrics and alert/runbook path |
@@ -163,14 +173,14 @@ The encoded 4-MiB value is 5,592,408 ASCII characters, below the host's 10-MB JS
 | WP09 | 3-4 PT | trusted UI with all authorization repeated worker-side |
 | WP10 | 4-5 PT | host installation, real agent negative cases, operational gates and independent reviews |
 | WP11 | 2-5 PT | packed artifact, versioned preflight, backup/restore, additive migration, observation and rollback |
-| Remaining WP01-WP11 | 31-47 PT | includes Hagen's additional 2-4 PT operating evidence; excludes tenant/admin waiting time |
+| Remaining WP01-WP11 | 30-46 PT | includes operating evidence; excludes tenant/admin waiting time and optional WP12-WP15 |
 
-Including approximately 2 PT spent on WP00, the revised version-1 estimate is 33-49 PT.
+Including the already completed WP00 and WP01A evidence work, the revised version-1 estimate remains 33-49 PT.
 
 ## Delivery state and rollback
 
-- Implemented: repository decision, self-verifying fingerprint, persistent synthetic SQL/CAS reservation probe, strict file contract, offline gateway contract and updated operating gates. Human-decision/audit persistence and a separate executor remain unimplemented WP03 gates.
-- Locally tested: yes, against the exact fingerprinted SDK source and a disposable local PostgreSQL cluster; 20/20 contract assertions passed.
+- Implemented: repository decision, clean source/registry pin, self-verifying fingerprint and lock/integrity checks, persistent synthetic SQL/CAS reservation probe, strict file contract, offline gateway contract and updated operating gates. Human-decision/audit persistence and a separate executor remain unimplemented WP03 gates.
+- Locally tested: yes, against the exact clean source pin and the installed registry SDK artifact with a disposable local PostgreSQL 17 cluster; 20/20 contract assertions passed, plus SDK 28/28.
 - Integrated with the running Paperclip host: no current acceptance claim. The original live observation is historical only and was removed from the corrected safety evidence. An installed M365 plugin was not tested; that is out of WP00 scope.
 - Tested with a real Microsoft account: no; prohibited in WP00.
 
