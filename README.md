@@ -20,5 +20,7 @@ Das Plugin soll eigene Microsoft-365-Verbindungen je Agent und gemeinsam genutzt
 - [Arbeitspakete mit Abhängigkeiten und Abnahmekriterien](docs/work-packages.md)
 - [API und Berechtigungen](docs/api-and-permissions.md)
 - [Recherche und technische Nachweise](docs/research.md)
+- [ADR 0001: geprüfte Paperclip-Laufzeitverträge](docs/decisions/0001-paperclip-runtime-contracts.md)
+- [Reproduzierbarer WP00-Vertragsversuch](experiments/wp00/README.md)
 
 Geplant sind TypeScript, das offizielle Paperclip Plugin SDK und Microsoft Graph v1.0. Die Anmeldung verwendet Microsoft Entra ID und MSAL. Zugangsdaten und produktive Konfiguration gehören in den Secret Store beziehungsweise die jeweilige Installation.

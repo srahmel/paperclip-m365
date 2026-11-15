@@ -4,7 +4,7 @@ Stand: 15. November 2026. Die folgenden Primärquellen begründen den Architektu
 
 ## Paperclip
 
-Die lokale Quellprüfung erfolgte auf Paperclip-Commit `c645b7795b5665eaafb3a30fe23e2deb0811dc6e`. Dieser lokale Commit ist im öffentlichen Upstream nicht verfügbar. Die relevanten Verträge zu Actor-Kontext, Secret-Auflösung, Manifest und Gateway wurden zusätzlich im öffentlichen Upstream-Commit `304e40fe9c6dde1d273710c30c137f62f1db4593` geprüft; die Quellverweise unten sind darauf festgelegt. Die lokal untersuchten SDK-Quelldateien nennen Version `1.0.0` und Node.js ab `24.11.0`. WP00 gleicht die tatsächlich zu unterstützende Installation mit dem benötigten Vertrag ab.
+Die lokale Quellprüfung erfolgte auf Paperclip-Commit `c645b7795b5665eaafb3a30fe23e2deb0811dc6e`. WP00 hat diesen Stand inzwischen gegen den laufenden Host geprüft: Version `2026.1106.0+131.git.c645b7795b.dirty`, Node.js `24.22.1`, SDK-Quellversion `1.0.0`. Weil der Host-Checkout bereits fremde Änderungen enthielt, hält [ADR 0001](decisions/0001-paperclip-runtime-contracts.md) zusätzlich die relevanten Dateihashes und den tracked Diff-Fingerprint fest. Dieser lokale Commit ist im öffentlichen Upstream nicht verfügbar. Die älteren öffentlichen Quellverweise unten bleiben auf Commit `304e40fe9c6dde1d273710c30c137f62f1db4593` festgelegt; für WP01 ist jedoch der in ADR 0001 geprüfte lokale Vertrag maßgeblich.
 
 | Quelle | Nachgewiesener Vertrag | Folgerung für den Plan |
 | --- | --- | --- |
@@ -76,9 +76,9 @@ Für Version 1 wird delegierter Zugriff geplant. Ein Microsoft-Benutzer und ein 
 
 Die ältere OneDrive-spezifische [Scope-Übersicht](https://learn.microsoft.com/en-us/onedrive/developer/rest-api/concepts/permissions_reference) und die aktuelle Graph-Berechtigungsreferenz unterscheiden sich unter anderem bei AppFolder-Angaben. Für die konkrete Umsetzung sind deshalb die aktuellen Graph-Endpoint-Verträge und die Graph-Berechtigungsreferenz maßgeblich. Version 1 benötigt AppFolder nicht.
 
-## Noch zu erbringende technische Nachweise
+## Erbrachte und noch offene technische Nachweise
 
-- Host-Version, authentisierter Freigabepfad, sichere Agentenidentität und exaktes Transportlimit in WP00.
+- WP00 erbracht: Host-/SDK-Fingerprint, Tool-/Actor-/Company-/DB-Verträge, authentisierter Plugin-Freigabepfad und 4-MiB-Transportlimit. Versuchsaufbau und Grenzen stehen in [ADR 0001](decisions/0001-paperclip-runtime-contracts.md).
 - Erfolgreiche Anmeldung und Consent im vorgesehenen Test-Tenant in WP02.
 - ETags, Konfliktverhalten und sichere Wiederholungen je tatsächlich genutztem Endpoint in den Fachpaketen.
 - Echte Agentenaufrufe einschließlich abgewiesener Fälle sowie Installation aus einem gepackten Artefakt in WP10 und WP11.

@@ -8,19 +8,20 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 
 | Paket | Ergebnis | Abhängigkeit | Aufwand |
 | --- | --- | --- | --- |
-| WP00 | Geprüfter Paperclip-Vertrag und Architekturentscheidungen | Keine | 1 bis 2 PT |
-| WP01 | Plugin-Grundgerüst, Build und CI | WP00 | 1 bis 2 PT |
-| WP02 | Microsoft-Anmeldung und verschlüsselter Token-Cache | WP01 | 3 bis 4 PT |
-| WP03 | Agentenrechte und konkrete Änderungsfreigaben | WP01, WP00 | 3 bis 4 PT |
-| WP04 | Graph-Transport, Fehlerbehandlung und Pagination | WP01 | 1 bis 2 PT |
+| WP00 | Geprüfter Paperclip-Vertrag und Architekturentscheidungen | Keine | ca. 2 PT, abgeschlossen |
+| WP01 | Plugin-Grundgerüst, Build und CI | WP00 | 2 bis 3 PT |
+| WP02 | Microsoft-Anmeldung und verschlüsselter Token-Cache | WP01 | 4 bis 6 PT |
+| WP03 | Agentenrechte und konkrete Änderungsfreigaben | WP01, WP00 | 4 bis 6 PT |
+| WP04 | Graph-Transport, Fehlerbehandlung und Pagination | WP01 | 2 bis 3 PT |
 | WP05 | Mail lesen und Outlook-Entwürfe bearbeiten | WP02, WP03, WP04 | 2 bis 3 PT |
 | WP06 | Mail senden und löschen | WP05 | 2 bis 3 PT |
 | WP07 | Kalender lesen und Termine bearbeiten | WP02, WP03, WP04 | 2 bis 3 PT |
-| WP08 | OneDrive-Dateien und Ordner bearbeiten | WP02, WP03, WP04 | 3 bis 4 PT |
-| WP09 | Vollständige Paperclip-Verwaltungsoberfläche | WP02, WP03, WP05 bis WP08 | 2 bis 3 PT |
-| WP10 | Unabhängige Reviews und Abnahmetests | WP05 bis WP09 | 2 bis 3 PT |
-| WP11 | Gepacktes Release und begrenzter Pilot | WP10 | 1 bis 2 PT |
-| Gesamt | Version 1 | WP00 bis WP11 | 23 bis 35 PT |
+| WP08 | OneDrive-Dateien und Ordner bearbeiten | WP02, WP03, WP04 | 3 bis 5 PT |
+| WP09 | Vollständige Paperclip-Verwaltungsoberfläche | WP02, WP03, WP05 bis WP08 | 3 bis 4 PT |
+| WP10 | Unabhängige Reviews und Abnahmetests | WP05 bis WP09 | 3 bis 4 PT |
+| WP11 | Gepacktes Release und begrenzter Pilot | WP10 | 2 bis 3 PT |
+| Rest | WP01 bis WP11 | WP00 abgenommen | 29 bis 43 PT |
+| Gesamt | Version 1 einschließlich WP00 | WP00 bis WP11 | 31 bis 45 PT |
 
 ## WP00 Paperclip und Microsoft Verträge prüfen
 
@@ -29,6 +30,8 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 **Arbeit:** Kleine isolierte Versuche für Manifest und Worker, Agententools, authentisierten menschlichen Actor-Kontext, Company-Grenzen, Plugin-Datenbank und JSON-Dateiübertragung. Device Code gegen Tenant-Richtlinien bewerten; Authorization Code mit PKCE bei Bedarf konkret planen. Keine produktive Verbindung einrichten.
 
 **Abnahme:** Gefälschte `agentId`, fremde Company, fehlender menschlicher Actor und ein unberechtigter Benutzer werden abgewiesen. Eine 4-MiB-Testdatei wird über den vorgesehenen Transport geprüft oder das Limit begründet reduziert. Es gibt keinen Einsatz von `ctx.assets`, einer nicht belegten Secret-Schreib-API oder einer nicht belegten Core-Approval-API.
+
+**Stand WP00:** Lokal abgeschlossen und in [ADR 0001](decisions/0001-paperclip-runtime-contracts.md) dokumentiert. Gewählt sind host-validierte Tool-Kontexte, eine authentisierte menschliche Plugin-Action auf einen unveränderlichen Auftrags-Hash und 4 MiB rohe Dateidaten als Base64 im Tool-/Action-JSON. Device Code bleibt bis zur zulässigen Tenant-Prüfung in WP02 eine ausdrücklich offene Voraussetzung.
 
 ## WP01 Grundgerüst und Versionsbindung
 
