@@ -1,8 +1,8 @@
 # ADR 0001: Paperclip runtime contracts for the M365 plugin
 
-- Status: accepted for WP01; Microsoft tenant prerequisite remains open for WP02
+- Status: corrected probes accepted locally; WP01 remains blocked until Vera and Hagen recommend the same correction commit
 - Date: 2026-11-15
-- Scope: HUM-271 / WP00
+- Scope: HUM-271 / WP00, corrected by HUM-276
 
 ## Decision summary
 
@@ -20,18 +20,19 @@ Native Paperclip company approvals are not the execution contract. This SDK expo
 
 ## Verified host and SDK fingerprint
 
-The running host checkout was already dirty before WP00. WP00 did not modify it. The contract baseline is therefore commit plus observed version plus relevant file hashes, not the commit alone.
+The running host checkout was already dirty before WP00. WP00 did not modify it. The contract baseline is therefore commit plus observed version plus relevant file hashes, not the commit alone. `experiments/wp00/expected-host-fingerprint.json` is the versioned source of truth. The probe recomputes every value before any contract test, emits the result as JSON and fails closed on a mismatch.
 
 | Item | Observed value |
 | --- | --- |
 | Health status | `ok`, authenticated/private deployment |
 | Server version | `2026.1106.0+131.git.c645b7795b.dirty` |
 | Git commit | `c645b7795b5665eaafb3a30fe23e2deb0811dc6e` |
-| Git describe | `v2026.1106.0-131-gc645b7795b-dirty` |
+| Git describe | Informational only; tag selection may vary while commit/diff remain exact |
 | Tracked diff object hash | `77968f3f8728699c27008864699c5e761e9b0dbe` |
 | SDK package | `@paperclipai/plugin-sdk` `1.0.0` |
 | SDK Node engine | `>=24.11.0` |
 | Running Node | `24.22.1` |
+| Pinned test runner | `tsx` `4.23.15`, exact CLI path and hash in the expectation file |
 
 Relevant SHA-256 file fingerprints:
 
@@ -42,6 +43,7 @@ Relevant SHA-256 file fingerprints:
 | `server/src/routes/plugins.ts` | `6741e2431a5f08ae42ba07ccb44caa723336a0f817ec0d820b98f7d3c7cbe234` |
 | `server/src/services/plugin-tool-dispatcher.ts` | `75de7da75c6bc4337c69c7c3d424d1bc009ee4ea7b8711febea9e9ca6b0ff53f` |
 | `server/src/services/tool-gateway.ts` | `5bd419acdcff262f02ae00b6316c57b9fb4efc90bdcf9e801561bd56f6c50870` |
+| `server/src/services/plugin-database.ts` | `6ab593f7b75e8844d1113504a7db039567a7626bc7a2718314441b3ded7e313b` |
 | `packages/plugins/sdk/package.json` | `44a73e89e08c00be1fa5e1ffda4d0a42b2f9cee39aa80b993f94a6fe0750a5ea` |
 | `packages/plugins/sdk/src/protocol.ts` | `027f43aa61478a13f913951fcf212791ac929676c84b1d7aa0819b76fcfa8aa0` |
 | `packages/plugins/sdk/src/types.ts` | `c613225d9482892fda0fb531089318f9f068780dda334bbc6d025a65f74c2189` |
@@ -55,7 +57,7 @@ The pre-existing tracked modifications hash to:
 - `packages/shared/src/connection-intent-guidance.ts`: `cbc6ef59ddf028472c4055495d511ac77e800f930fcb5360ed312503d128961a`
 - `server/src/index.ts`: `596e8d824f24499d3a811141ce1d89e7cac8ebf866c39cf02d4c49a3fa1f9057`
 
-WP01 must pin an obtainable SDK/Shared artifact matching this contract or rebuild and repeat the probe against the chosen clean commit. The string `1.0.0` alone is not a sufficient pin.
+WP01's first gate is an obtainable clean SDK/Shared artifact with a lock/integrity proof and a repeated green fingerprint/contract probe. No feature code starts before that gate. The string `1.0.0` alone and the current dirty local checkout are not sufficient pins.
 
 ## Contract findings
 
@@ -65,7 +67,7 @@ WP01 must pin an obtainable SDK/Shared artifact matching this contract or rebuil
 | Tool gateway | The HTTP route requires agent, run, company and project; host lookup checks their relationships before dispatch | Plugin still checks its own agent assignment and resource policy using `runCtx` |
 | Action actor | The host constructs immutable `PluginPerformActionContext`; an authorized company overrides a spoofed `params.companyId` | Human approval accepts no `approvedBy`, `userId`, `agentId` or company authority from JSON |
 | Company scope | Agent JWT and bridge scope checks reject inaccessible companies; worker invocations carry company scope | Every database lookup includes the host-derived company and fails closed |
-| Database | Host-derived namespace plus capability-gated `query` and `execute` | Use migrations and parameterized SQL; no arbitrary schema selection |
+| Database | Host-derived namespace plus capability-gated `query` and `execute`; runtime mutations are single statements and `execute` returns affected `rowCount` | Use migrations and parameterized SQL; reserve through one conditional `UPDATE`, never assume an undocumented multi-statement transaction |
 | Secrets | `ctx.secrets.resolve()` exists; no general `ctx.secrets.set()` contract | Provision the cache-encryption key through the supported Secret Store flow |
 | Files | `ctx.assets` is absent. Global JSON parser is 10 MB; scoped plugin API request body is 1,000,000 bytes | 4-MiB raw content is allowed only through tool/action Base64 JSON; reject larger input before Graph I/O |
 
@@ -79,29 +81,22 @@ Run:
 pwsh -NoProfile -File .\experiments\wp00\run.ps1 -PaperclipSource ..\paperclip
 ```
 
-The synthetic probe passed with:
+The corrected synthetic probe passed 20 assertions against a fresh loopback-only PostgreSQL 17 cluster. It uses the SDK action harness, the public `ctx.db.query`/`ctx.db.execute` interface, the host's actual runtime SQL validators and PostgreSQL's real affected-row count. It proves:
 
-- manifest API version 1 and worker entrypoint;
-- database namespace `test_srahmel_m365_contract_probe`, one write and one read recorded;
-- caller-supplied `agentId`, `companyId` and `approvedBy` ignored as authority;
-- foreign tool agent, foreign company, missing human actor, unauthorized human and foreign approval company rejected;
-- 4,194,304 raw bytes -> 5,592,408 Base64 bytes -> 5,592,708-byte serialized tool request;
-- round-trip SHA-256 `8c7631389970cde5de2c18211fd7b0e8f0618c6ea0221542f518ce4336149203`.
+- the stored immutable snapshot binds company, connection, requesting agent, approving user, action, target, complete canonical payload, policy, required permission, creation, expiry and state;
+- two parallel approvals produce exactly one `rowCount === 1` winner; replay, foreign company, altered connection/agent/policy/target/payload, expiry and revoked agent or approver rights are rejected;
+- preview and execution return the identical stored canonical payload and SHA-256;
+- a mutation injected between load and reservation loses the conditional update;
+- `unknown` survives a fresh harness and fresh database connection over the same persistent row and cannot be automatically reserved again;
+- Base64 boundaries 0, 1, 4 MiB minus 1, exactly 4 MiB and 4 MiB plus 1, plus invalid characters, padding and pad bits, behave as specified.
 
-Four requests against the running host's `/api/plugins/tools/execute` route also used synthetic UUIDs and caused no dispatch:
+`host-gateway-probe.ps1` is now offline-only. It has one fixed local synthetic echo identifier and checks risk, side-effect, data-class and transport metadata before a dispatch could be formed. The passing result reports zero network calls and zero dispatches, while arbitrary tool ID, write risk, side effects, real data and remote transport all fail closed.
 
-| Case | Result |
-| --- | --- |
-| Foreign company | HTTP 403, agent key cannot access another company |
-| Forged agent | HTTP 403, agent does not belong to run company |
-| Forged run | HTTP 403, run does not belong to run company |
-| Foreign project | HTTP 403, project does not belong to run company |
-
-The same running route accepted a 5,592,698-byte JSON request containing the synthetic 4-MiB Base64 payload and dispatched the existing read-only `srahmel.personal-todo:list_tasks` tool with HTTP 200. Only status and byte counts were recorded; returned task content was not included in the evidence. This verifies the actual host parser/gateway transport, while the dedicated harness probe verifies byte count and SHA-256 behavior expected from the future M365 handler.
+The earlier live request through `srahmel.personal-todo:list_tasks` did dispatch to a running instance. Its claimed read-only property was not technically enforced by that script, so it is retracted as safety or acceptance evidence. No running Paperclip route is called by the corrected probe. A future execute mode requires separate approval, an isolated test instance, dummy data and a technical isolation check.
 
 Upstream evidence on the same source state:
 
-- SDK: `testing-actions.test.ts` and `worker-rpc-host.test.ts`: 28/28 passed.
+- SDK baseline from the original WP00 state: `testing-actions.test.ts` and `worker-rpc-host.test.ts`: 28/28 passed. The corrected probe additionally imports and validates the exact same fingerprinted SDK source.
 - Host: two tool-scope tests passed; the actor-context test initially exceeded the repository's 15-second test budget during cold transform, then passed in 20.943 seconds with a 30-second budget. This was a test-runner timing failure, not an assertion failure.
 
 These checks do not claim a locally installed M365 plugin. Installation is explicitly deferred to WP01/WP10.
@@ -120,9 +115,9 @@ No tenant login was started in WP00. If any prerequisite fails, WP02 must stop a
 
 ## File limit decision
 
-Version 1 accepts at most 4 MiB raw file content per tool/action call. The limit is checked before Base64 decoding allocation is used for Graph mutation and before any external request. The full Base64 string is part of the immutable operation snapshot and hash.
+Version 1 accepts at most 4 MiB raw file content per tool/action call. Canonical alphabet, structure, padding/pad bits, encoded length and exact decoded length are checked before Base64 decoding allocation and before any external request. Exact raw length and canonical round trip are checked after decoding. The complete canonical operation payload—not only file bytes—binds action, target, identities, policy and the full Base64 string in one SHA-256.
 
-The observed serialized 4-MiB request is about 5.59 MB, below the host's 10-MB JSON limit. It is above the scoped API's 1,000,000-byte limit, so `/api/plugins/:pluginId/api/...` cannot carry version-1 file bodies. Protocol overhead remains below 10 MB with ample margin, but WP08 must add an explicit encoded-size guard and tests near the boundary. Larger files remain WP13.
+The encoded 4-MiB value is 5,592,408 ASCII characters, below the host's 10-MB JSON limit but above the scoped API's 1,000,000-byte limit, so `/api/plugins/:pluginId/api/...` cannot carry version-1 file bodies. In Node it can temporarily occupy about 11.18 MiB as UTF-16 text plus a 4-MiB `Buffer`, JSON/parser overhead and the immutable snapshot. Concurrent requests multiply that pressure. WP08 must measure peak RSS at the boundary and set explicit concurrency, timeout and rate-limit gates before OneDrive acceptance. Larger files remain WP13.
 
 ## Alternatives considered
 
@@ -137,12 +132,16 @@ The observed serialized 4-MiB request is about 5.59 MB, below the host's 10-MB J
 
 ## Risks and compatibility gates
 
-- The host is an alpha plugin runtime and the tested checkout is dirty. Any host/SDK upgrade requires rerunning the probe and the selected upstream tests.
+- The host is an alpha plugin runtime and the tested checkout is dirty. WP01 must replace this with a clean obtainable SDK/Shared pin, lock/integrity proof and repeated probe before feature code; any later host/SDK upgrade repeats the same gate.
 - Base64 creates roughly 33% size overhead and whole-request memory pressure. Keep 4 MiB as a hard raw limit and never log payloads.
 - Same-origin UI code is trusted code. A UI check never replaces worker authorization.
 - Tool gateway identity binding does not replace the plugin's connection/action/resource authorization.
 - Device Code may be disabled by the target tenant. That is a WP02 external prerequisite, not a reason to silently choose another flow.
-- Microsoft and Paperclip integration behavior remains unverified until WP02/WP10.
+- WP03 must repeat CAS, replay, restart and persistent-`unknown` evidence in the actual plugin persistence layer.
+- WP04, WP10 and WP11 require content-free metrics, named thresholds, an alert path and an exercised runbook.
+- WP08 must prove boundary sizes, parallel behavior, peak RSS, timeout and rate-limit enforcement before external file I/O is accepted.
+- Before installation or migration, WP11 requires a version-bound preflight, backup/restore proof, additive migration, observation window and ordered rollback.
+- Microsoft and installed-plugin integration behavior remains unverified until WP02/WP10.
 
 ## Updated remaining estimate
 
@@ -151,23 +150,23 @@ The observed serialized 4-MiB request is about 5.59 MB, below the host's 10-MB J
 | WP01 | 2-3 PT | clean reproducible SDK/Shared pin, worker/UI build and repeatable contract probe |
 | WP02 | 4-6 PT | tenant prerequisite, MSAL flow decision and encrypted concurrent token cache |
 | WP03 | 4-6 PT | private immutable operation store, authenticated action approval and atomic execution |
-| WP04 | 2-3 PT | curated Graph transport, redirect and error guards |
+| WP04 | 3-4 PT | curated Graph transport, redirect/error guards, content-free metrics and alert/runbook path |
 | WP05 | 2-3 PT | unchanged functional scope, now built on explicit policy seam |
 | WP06 | 2-3 PT | send/delete ambiguity and snapshot execution |
 | WP07 | 2-3 PT | timezone/concurrency behavior |
 | WP08 | 3-5 PT | Base64 guards, 4-MiB binary round trip and OneDrive conflict behavior |
 | WP09 | 3-4 PT | trusted UI with all authorization repeated worker-side |
-| WP10 | 3-4 PT | host installation, real agent negative cases and independent reviews |
-| WP11 | 2-3 PT | packed artifact, supported-host matrix and pilot rollback |
-| Remaining WP01-WP11 | 29-43 PT | excludes tenant/admin waiting time |
+| WP10 | 4-5 PT | host installation, real agent negative cases, operational gates and independent reviews |
+| WP11 | 2-5 PT | packed artifact, versioned preflight, backup/restore, additive migration, observation and rollback |
+| Remaining WP01-WP11 | 31-47 PT | includes Hagen's additional 2-4 PT operating evidence; excludes tenant/admin waiting time |
 
-Including approximately 2 PT spent on WP00, the revised version-1 estimate is 31-45 PT.
+Including approximately 2 PT spent on WP00, the revised version-1 estimate is 33-49 PT.
 
 ## Delivery state and rollback
 
-- Implemented: repository decision, reproducible synthetic probe, updated planning assumptions.
-- Locally tested: yes, against the exact SDK source and the running host's negative gateway path.
-- Integrated with the running Paperclip host: health/fingerprint, four rejected gateway-scope cases and one successful synthetic 4-MiB request through an existing read-only plugin tool. An installed M365 plugin was not tested; that is out of WP00 scope.
+- Implemented: repository decision, self-verifying fingerprint, persistent synthetic SQL/CAS probe, strict file contract, offline gateway contract and updated operating gates.
+- Locally tested: yes, against the exact fingerprinted SDK source and a disposable local PostgreSQL cluster; 20/20 contract assertions passed.
+- Integrated with the running Paperclip host: no current acceptance claim. The original live observation is historical only and was removed from the corrected safety evidence. An installed M365 plugin was not tested; that is out of WP00 scope.
 - Tested with a real Microsoft account: no; prohibited in WP00.
 
 Rollback is documentation-only: revert this ADR, the WP00 experiment and the associated planning edits. No plugin was installed, no schema was migrated, no Microsoft connection was created and no external data was mutated.

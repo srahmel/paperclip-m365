@@ -8,20 +8,20 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 
 | Paket | Ergebnis | Abhängigkeit | Aufwand |
 | --- | --- | --- | --- |
-| WP00 | Geprüfter Paperclip-Vertrag und Architekturentscheidungen | Keine | ca. 2 PT, abgeschlossen |
-| WP01 | Plugin-Grundgerüst, Build und CI | WP00 | 2 bis 3 PT |
+| WP00 | Geprüfter Paperclip-Vertrag und Architekturentscheidungen | Keine | ca. 2 PT, korrigierter Stand wartet auf Doppelreview |
+| WP01 | Plugin-Grundgerüst, Build und CI | WP00 sowie Vera-/Hagen-Empfehlung auf demselben Commit | 2 bis 3 PT |
 | WP02 | Microsoft-Anmeldung und verschlüsselter Token-Cache | WP01 | 4 bis 6 PT |
 | WP03 | Agentenrechte und konkrete Änderungsfreigaben | WP01, WP00 | 4 bis 6 PT |
-| WP04 | Graph-Transport, Fehlerbehandlung und Pagination | WP01 | 2 bis 3 PT |
+| WP04 | Graph-Transport, Fehlerbehandlung, Pagination und Betriebsmetriken | WP01 | 3 bis 4 PT |
 | WP05 | Mail lesen und Outlook-Entwürfe bearbeiten | WP02, WP03, WP04 | 2 bis 3 PT |
 | WP06 | Mail senden und löschen | WP05 | 2 bis 3 PT |
 | WP07 | Kalender lesen und Termine bearbeiten | WP02, WP03, WP04 | 2 bis 3 PT |
 | WP08 | OneDrive-Dateien und Ordner bearbeiten | WP02, WP03, WP04 | 3 bis 5 PT |
 | WP09 | Vollständige Paperclip-Verwaltungsoberfläche | WP02, WP03, WP05 bis WP08 | 3 bis 4 PT |
-| WP10 | Unabhängige Reviews und Abnahmetests | WP05 bis WP09 | 3 bis 4 PT |
-| WP11 | Gepacktes Release und begrenzter Pilot | WP10 | 2 bis 3 PT |
-| Rest | WP01 bis WP11 | WP00 abgenommen | 29 bis 43 PT |
-| Gesamt | Version 1 einschließlich WP00 | WP00 bis WP11 | 31 bis 45 PT |
+| WP10 | Unabhängige Reviews, Betriebsprüfung und Abnahmetests | WP05 bis WP09 | 4 bis 5 PT |
+| WP11 | Gepacktes Release, Migrations-/Rollbacknachweis und begrenzter Pilot | WP10 | 2 bis 5 PT |
+| Rest | WP01 bis WP11 | korrigiertes WP00 doppelt empfohlen | 31 bis 47 PT |
+| Gesamt | Version 1 einschließlich WP00 | WP00 bis WP11 | 33 bis 49 PT |
 
 ## WP00 Paperclip und Microsoft Verträge prüfen
 
@@ -31,15 +31,15 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 
 **Abnahme:** Gefälschte `agentId`, fremde Company, fehlender menschlicher Actor und ein unberechtigter Benutzer werden abgewiesen. Eine 4-MiB-Testdatei wird über den vorgesehenen Transport geprüft oder das Limit begründet reduziert. Es gibt keinen Einsatz von `ctx.assets`, einer nicht belegten Secret-Schreib-API oder einer nicht belegten Core-Approval-API.
 
-**Stand WP00:** Lokal abgeschlossen und in [ADR 0001](decisions/0001-paperclip-runtime-contracts.md) dokumentiert. Gewählt sind host-validierte Tool-Kontexte, eine authentisierte menschliche Plugin-Action auf einen unveränderlichen Auftrags-Hash und 4 MiB rohe Dateidaten als Base64 im Tool-/Action-JSON. Device Code bleibt bis zur zulässigen Tenant-Prüfung in WP02 eine ausdrücklich offene Voraussetzung.
+**Stand WP00:** Der korrigierte lokale Nachweis ist grün und in [ADR 0001](decisions/0001-paperclip-runtime-contracts.md) dokumentiert. Gewählt sind host-validierte Tool-Kontexte, eine authentisierte menschliche Plugin-Action auf einen persistenten unveränderlichen Snapshot, ein einzelner bedingter SQL-Zustandswechsel mit geprüftem `rowCount` und höchstens 4 MiB rohe Dateidaten als strikt kanonisches Base64 im Tool-/Action-JSON. Der frühere Live-Gateway-Aufruf ist kein Sicherheitsnachweis mehr; der aktuelle Gateway-Probe ist ausschließlich offline. WP01 bleibt bis zu neuen unabhängigen Empfehlungen von Vera und Hagen auf exakt demselben Commit gesperrt. Device Code bleibt bis zur zulässigen Tenant-Prüfung in WP02 eine ausdrücklich offene Voraussetzung.
 
 ## WP01 Grundgerüst und Versionsbindung
 
 **Ergebnis:** TypeScript-Paket mit Manifest, Worker, React-UI-Einstieg, migrationsfähigem Plugin-Schema, Lockdatei und CI. SDK und Shared-Paket sind an geprüfte Artefakte gebunden.
 
-**Arbeit:** Plugin-ID und Paketnamen prüfen, Scaffold aus der passenden Paperclip-Version übernehmen, Build für Worker und UI konfigurieren, Dependency- und Secret-Prüfung ergänzen. Lizenz für den eigenen Code festlegen; Übernahmen aus Softeria getrennt kennzeichnen. Beispielkonfiguration enthält ausschließlich Platzhalter.
+**Arbeit:** Vor Featurecode einen sauber erhältlichen SDK-/Shared-Pin mit Lock- und Integritätsnachweis herstellen und den vollständigen selbstprüfenden WP00-Probe gegen diesen sauberen Stand erneut ausführen. Erst danach Plugin-ID und Paketnamen prüfen, Scaffold übernehmen, Build für Worker und UI konfigurieren sowie Dependency- und Secret-Prüfung ergänzen. Lizenz für den eigenen Code festlegen; Übernahmen aus Softeria getrennt kennzeichnen. Beispielkonfiguration enthält ausschließlich Platzhalter.
 
-**Abnahme:** Typecheck, gezielte Tests und Build laufen in einer frischen Umgebung. Ein `npm pack`-Artefakt enthält die benötigten Ausgaben und keine lokalen Konfigurationen, Sitzungen oder Token-Dateien. Installation und Disable/Enable funktionieren in einer isolierten Testinstanz auf Windows und Linux.
+**Abnahme:** Der SDK-/Shared-Pin ist aus einer dokumentierten Quelle frisch erhältlich, Lockfile und Prüfsummen sind nachvollziehbar und der Fingerprint-/Vertragsprobe ist vor dem ersten Featurecode grün. Danach laufen Typecheck, gezielte Tests und Build in einer frischen Umgebung. Ein `npm pack`-Artefakt enthält die benötigten Ausgaben und keine lokalen Konfigurationen, Sitzungen oder Token-Dateien. Installation und Disable/Enable funktionieren in einer isolierten Testinstanz auf Windows und Linux.
 
 ## WP02 Anmeldung und Kontoverbindungen
 
@@ -55,15 +55,15 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 
 **Arbeit:** Bindings, Ressourcenregeln und berechtigte menschliche Freigeber verwalten. Vorschau und tatsächlichen Payload über einen Hash verbinden; Inhalt, Identität, Ablauf und Richtlinienversion binden. Ausführung über atomare Reservierung genau eines Auftrags zulassen. Sensible Auftragsinhalte verschlüsseln und nach Ablauf bereinigen.
 
-**Abnahme:** Agent A und B können dieselbe Verbindung mit verschiedenen Rechten verwenden; Agent C bleibt gesperrt. Selbstfreigabe, fremde `connectionId`, manipulierte Vorschau, abgelaufene Freigabe, Rechteentzug und parallele Ausführungen schlagen ohne externe Mutation fehl. Nach Worker-Abbruch bleibt ein unklarer Ausgang gesperrt, bis er geklärt wurde. Die bestätigte Vorschau entspricht dem gesendeten Graph-Payload.
+**Abnahme:** Agent A und B können dieselbe Verbindung mit verschiedenen Rechten verwenden; Agent C bleibt gesperrt. Ein persistenter DB-Nachweis deckt CAS/`rowCount`, genau einen Gewinner, Replay, Prozessneustart, TOCTOU und den gesperrten Zustand `unknown` ab. Selbstfreigabe, fremde `connectionId`, manipulierte Vorschau, abgelaufene Freigabe, Rechteentzug und parallele Ausführungen schlagen ohne externe Mutation fehl. Nach Worker-Abbruch bleibt ein unklarer Ausgang auch nach Neustart gesperrt, bis er geklärt wurde. Die bestätigte Vorschau entspricht dem gesendeten Graph-Payload.
 
 ## WP04 Graph Grundfunktionen
 
 **Ergebnis:** Gemeinsamer Graph-Client mit erlaubten Endpoints, Timeouts, Größenbegrenzungen, strukturierten Fehlern, Paging und nachvollziehbarer Request-ID.
 
-**Arbeit:** Abbruchsignale, Microsoft-Fehlercodes, Ablauf der Anmeldung, `429` und begrenzte Wiederholungen behandeln. Fortsetzungsmerkmale an Verbindung und Anfrage binden. Download-Weiterleitungen getrennt vom Graph-Bearer behandeln. Der Client akzeptiert keine beliebigen URLs vom Agenten.
+**Arbeit:** Abbruchsignale, Microsoft-Fehlercodes, Ablauf der Anmeldung, `429` und begrenzte Wiederholungen behandeln. Fortsetzungsmerkmale an Verbindung und Anfrage binden. Download-Weiterleitungen getrennt vom Graph-Bearer behandeln. Der Client akzeptiert keine beliebigen URLs vom Agenten. Inhaltsfreie Metriken für Latenz, Statusklasse, Drosselung, Timeout und unklare Mutationen mit benannten Schwellen, Alarmweg und Runbook vorsehen.
 
-**Abnahme:** Mehrseitige Ergebnisse werden korrekt fortgesetzt und als vollständig oder unvollständig ausgewiesen. Tests decken `401`, `403`, `404`, `409`, `412`, `429`, Timeout und `5xx` ab. `Retry-After` wird respektiert; unklare Mutationen werden nicht automatisch wiederholt. Manipulierte Fortsetzungslinks und fremde Downloadziele werden blockiert.
+**Abnahme:** Mehrseitige Ergebnisse werden korrekt fortgesetzt und als vollständig oder unvollständig ausgewiesen. Tests decken `401`, `403`, `404`, `409`, `412`, `429`, Timeout und `5xx` ab. `Retry-After` wird respektiert; unklare Mutationen werden nicht automatisch wiederholt. Manipulierte Fortsetzungslinks und fremde Downloadziele werden blockiert. Metriken enthalten keine Nutzinhalte, Schwellen lösen den dokumentierten Alarmweg aus und das Runbook führt zu einer prüfbaren Reaktion.
 
 ## WP05 Mail lesen und Entwürfe
 
@@ -95,7 +95,7 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 
 **Arbeit:** Zieldrive und Elternkette prüfen, Dateinamen und Pfade validieren, Größenlimits durchsetzen. Namenskonflikte ausdrücklich behandeln; bestehende Dateien nur über einen eigenen freigegebenen Ersetzungsauftrag ändern. Bei unterstützten Operationen `If-Match` erzwingen. Leere Ordner löschen; rekursive Ordnerlöschung bleibt gesperrt.
 
-**Abnahme:** Eine Binärdatei hat nach Upload und Download denselben SHA-256-Hash. Namenskonflikt, falsches ETag, fremder Drive, manipulierte Elternkette und Verknüpfungen auf fremde Ressourcen führen zu keiner Änderung. Eine bestehende Datei wird beim gewöhnlichen Anlegen nicht überschrieben. Überschreitung des Transportlimits wird vor der Mutation gemeldet. Löschen verwendet die Papierkorboperation.
+**Abnahme:** Eine Binärdatei hat nach Upload und Download denselben SHA-256-Hash. Namenskonflikt, falsches ETag, fremder Drive, manipulierte Elternkette und Verknüpfungen auf fremde Ressourcen führen zu keiner Änderung. Eine bestehende Datei wird beim gewöhnlichen Anlegen nicht überschrieben. Tests belegen 0 Byte, 1 Byte, knapp unter, exakt auf und über 4 MiB sowie ungültiges/nichtkanonisches Base64. Grenz- und Parallelitätsläufe erfassen Peak RSS, Timeout-Verhalten und wirksame Rate-/Concurrency-Limits; Überschreitungen scheitern vor externer I/O. Löschen verwendet die Papierkorboperation.
 
 ## WP09 Verwaltungsoberfläche
 
@@ -109,7 +109,7 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 
 **Ergebnis:** Unabhängige Betriebsprüfung sowie QA- und Sicherheitsprüfung mit nachvollziehbaren Befunden und Nachprüfung wesentlicher Korrekturen.
 
-**Arbeit:** Testkonto und synthetische Nachrichten, Kalender und Dateien verwenden. Host-Gateway, Plugin-Policy und Microsoft-Scopes gemeinsam prüfen. Authentisierte echte Agentenläufe für erlaubte und verbotene Fälle verwenden; ein menschlicher Action Tester allein genügt nicht. Tokenleck, Prompt Injection, konkurrierende Aktionen, Neustart und Rechteentzug prüfen.
+**Arbeit:** Testkonto und synthetische Nachrichten, Kalender und Dateien verwenden. Host-Gateway, Plugin-Policy und Microsoft-Scopes gemeinsam prüfen. Authentisierte echte Agentenläufe für erlaubte und verbotene Fälle verwenden; ein menschlicher Action Tester allein genügt nicht. Tokenleck, Prompt Injection, konkurrierende Aktionen, Neustart und Rechteentzug prüfen. Inhaltsfreie Metriken, Schwellen, Alarmweg und Runbook gemeinsam mit den WP04-/WP08-Grenzen abnehmen.
 
 **Abnahme:** Alle angefragten CRUD-Funktionen sind über Paperclip nachgewiesen. Negativtests verhindern konto- und companyübergreifenden Zugriff. Testnachweise enthalten keine produktiven Inhalte oder Tokens. Offene wesentliche Befunde sperren das Release; wesentliche Korrekturen erhalten eine erneute unabhängige Prüfung.
 
@@ -117,9 +117,9 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 
 **Ergebnis:** Versioniertes installierbares Paket, Installations- und Entra-Anleitung, Berechtigungsmatrix, Wiederherstellungsanleitung und dokumentierter Pilot.
 
-**Arbeit:** Installation aus dem gepackten Artefakt testen; Upgrade, Disable/Enable, Cache-Schlüsselrotation, Trennen und Wiederherstellen prüfen. Zunächst einen begrenzten Lesezugang aktivieren, danach einzeln freigegebene Schreib- und Löschfälle auf benannten Testobjekten. Vor produktivem Einsatz müssen die dort geltenden Zugriffsregeln den direkten Graph-Weg erlauben.
+**Arbeit:** Vor Installation oder Migration einen an Host-, SDK-, Shared- und Paketversion gebundenen Preflight ausführen. Backup und Restore in einer isolierten Instanz nachweisen; Migrationen additiv und beobachtbar ausführen und die Reihenfolge Preflight → Backup → additive Migration → Beobachtung → Freigabe beziehungsweise Rollback dokumentieren. Upgrade, Disable/Enable, Cache-Schlüsselrotation, Trennen und Wiederherstellen prüfen. Zunächst einen begrenzten Lesezugang aktivieren, danach einzeln freigegebene Schreib- und Löschfälle auf benannten Testobjekten. Inhaltsfreie Betriebsmetriken, Schwellen, Alarmweg und Runbook müssen aktiv sein. Vor produktivem Einsatz müssen die dort geltenden Zugriffsregeln den direkten Graph-Weg erlauben.
 
-**Abnahme:** Das Paket lässt sich ohne Entwicklercheckout installieren. Die dokumentierten Host-Versionen stimmen mit dem getesteten Artefakt überein. Backup plus getrennt gesicherter Schlüssel lässt sich in einer isolierten Instanz wiederherstellen; der Restore wiederholt keine offenen Mutationen. Alle vorgesehenen Aktionen funktionieren sowohl bei eigener als auch gemeinsam genutzter Kontoverbindung mit den jeweiligen Agentenrechten.
+**Abnahme:** Das Paket lässt sich ohne Entwicklercheckout installieren. Die dokumentierten Host-Versionen stimmen mit dem getesteten Artefakt überein und der versionsgebundene Preflight scheitert bei Abweichung. Backup plus getrennt gesicherter Schlüssel lässt sich in einer isolierten Instanz wiederherstellen; der Restore wiederholt keine offenen oder unklaren Mutationen. Additive Migration, Beobachtungsfenster und Rollbackreihenfolge sind reproduzierbar. Alle vorgesehenen Aktionen funktionieren sowohl bei eigener als auch gemeinsam genutzter Kontoverbindung mit den jeweiligen Agentenrechten.
 
 ## Optionale Erweiterungen
 

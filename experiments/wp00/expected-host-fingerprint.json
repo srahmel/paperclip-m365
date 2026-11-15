@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "commit": "c645b7795b5665eaafb3a30fe23e2deb0811dc6e",
+  "trackedDiffHash": "77968f3f8728699c27008864699c5e761e9b0dbe",
+  "nodeVersion": "24.22.1",
+  "sdk": {
+    "name": "@paperclipai/plugin-sdk",
+    "version": "1.0.0",
+    "nodeEngine": ">=24.11.0"
+  },
+  "runner": {
+    "package": "tsx",
+    "version": "4.23.15",
+    "relativeCliPath": "node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/cli.mjs"
+  },
+  "files": {
+    "server/src/app.ts": "351252f94ed7f5672556d24e0cfe41dbb28bf9dd290e94b3c37f6483930c94db",
+    "server/src/http/body-limits.ts": "4a2a828cc40f627dea870225913f53a72686d43b914cd8c7ffb4dee541c3d066",
+    "server/src/routes/plugins.ts": "6741e2431a5f08ae42ba07ccb44caa723336a0f817ec0d820b98f7d3c7cbe234",
+    "server/src/services/plugin-tool-dispatcher.ts": "75de7da75c6bc4337c69c7c3d424d1bc009ee4ea7b8711febea9e9ca6b0ff53f",
+    "server/src/services/tool-gateway.ts": "5bd419acdcff262f02ae00b6316c57b9fb4efc90bdcf9e801561bd56f6c50870",
+    "server/src/services/plugin-database.ts": "6ab593f7b75e8844d1113504a7db039567a7626bc7a2718314441b3ded7e313b",
+    "packages/plugins/sdk/package.json": "44a73e89e08c00be1fa5e1ffda4d0a42b2f9cee39aa80b993f94a6fe0750a5ea",
+    "packages/plugins/sdk/src/protocol.ts": "027f43aa61478a13f913951fcf212791ac929676c84b1d7aa0819b76fcfa8aa0",
+    "packages/plugins/sdk/src/types.ts": "c613225d9482892fda0fb531089318f9f068780dda334bbc6d025a65f74c2189",
+    "packages/plugins/sdk/src/testing.ts": "73b4bc43d0c8cb618c12e87962394fb03d8ecc2f9df609b6ac91d9c0fb2d7708",
+    "packages/plugins/sdk/src/worker-rpc-host.ts": "f01bb1e4de528461a0dd95fd096ce26a309aad3198829d5239d2196e945d73bc",
+    "packages/shared/src/types/plugin.ts": "72a91be3bda0fcd3167561b8c1ca0f68262526d64c3edbb1bda35a4d47c1f32f",
+    "packages/shared/src/constants.ts": "74e1512ca3c06b6395aa0082516daf5265e06778d393125cc7afb0daae201b16",
+    "node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/package.json": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c",
+    "node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/cli.mjs": "8690135061bc49d187143493b82d26a09b7fb71d6dd817d2242cc9dc52506de9"
+  },
+  "preExistingTrackedFiles": {
+    "packages/shared/src/connection-intent-guidance.ts": "cbc6ef59ddf028472c4055495d511ac77e800f930fcb5360ed312503d128961a",
+    "server/src/index.ts": "596e8d824f24499d3a811141ce1d89e7cac8ebf866c39cf02d4c49a3fa1f9057"
+  }
+}

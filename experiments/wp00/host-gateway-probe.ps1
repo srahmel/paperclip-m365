@@ -1,98 +1,56 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$ProjectId,
-
-    [string]$ReadOnlyTool = 'srahmel.personal-todo:list_tasks'
+    [ValidateSet('Offline')]
+    [string]$Mode = 'Offline'
 )
 
 $ErrorActionPreference = 'Stop'
-$requiredEnvironment = @(
-    'PAPERCLIP_API_URL',
-    'PAPERCLIP_API_KEY',
-    'PAPERCLIP_COMPANY_ID',
-    'PAPERCLIP_AGENT_ID',
-    'PAPERCLIP_RUN_ID'
+
+# There is deliberately no execute mode in WP00. A future live mode requires a
+# separately approved isolated Paperclip instance and dummy-data contract.
+$safeTool = [ordered]@{
+    id = 'wp00.synthetic:echo'
+    risk = 'read'
+    sideEffects = $false
+    dataClass = 'synthetic'
+    transport = 'local-only'
+}
+
+function Test-SafeDispatchMetadata {
+    param([hashtable]$Metadata)
+
+    if ($Metadata.id -cne $safeTool.id) { throw 'tool is not on the fixed WP00 allowlist' }
+    if ($Metadata.risk -cne $safeTool.risk) { throw 'tool risk class is not read-only' }
+    if ($Metadata.sideEffects -ne $false) { throw 'tool metadata permits side effects' }
+    if ($Metadata.dataClass -cne 'synthetic') { throw 'tool metadata permits non-synthetic data' }
+    if ($Metadata.transport -cne 'local-only') { throw 'tool metadata permits a remote dispatch' }
+    return $true
+}
+
+$allowed = Test-SafeDispatchMetadata ([hashtable]$safeTool)
+$negativeCases = @(
+    @{ name = 'arbitrary-tool-id'; metadata = @{ id = 'srahmel.personal-todo:list_tasks'; risk = 'read'; sideEffects = $false; dataClass = 'synthetic'; transport = 'local-only' } },
+    @{ name = 'unsafe-risk'; metadata = @{ id = $safeTool.id; risk = 'write'; sideEffects = $false; dataClass = 'synthetic'; transport = 'local-only' } },
+    @{ name = 'side-effects'; metadata = @{ id = $safeTool.id; risk = 'read'; sideEffects = $true; dataClass = 'synthetic'; transport = 'local-only' } },
+    @{ name = 'real-data'; metadata = @{ id = $safeTool.id; risk = 'read'; sideEffects = $false; dataClass = 'production'; transport = 'local-only' } },
+    @{ name = 'remote-dispatch'; metadata = @{ id = $safeTool.id; risk = 'read'; sideEffects = $false; dataClass = 'synthetic'; transport = 'http' } }
 )
-foreach ($name in $requiredEnvironment) {
-    if (-not [Environment]::GetEnvironmentVariable($name)) {
-        throw "Required environment variable is missing: $name"
+$rejected = foreach ($case in $negativeCases) {
+    try {
+        $null = Test-SafeDispatchMetadata $case.metadata
+        throw "unsafe case was accepted: $($case.name)"
+    } catch {
+        if ($_.Exception.Message -like 'unsafe case was accepted:*') { throw }
+        [ordered]@{ case = $case.name; rejected = $true; reason = $_.Exception.Message }
     }
 }
 
-$base = $env:PAPERCLIP_API_URL.TrimEnd('/')
-$api = if ($base.EndsWith('/api')) { $base } else { "$base/api" }
-$headers = @{
-    Authorization = "Bearer $env:PAPERCLIP_API_KEY"
-    'Content-Type' = 'application/json'
-}
-
-function Invoke-RejectedProbe {
-    param(
-        [string]$Name,
-        [string]$CompanyId,
-        [string]$AgentId,
-        [string]$RunId,
-        [string]$ProbeProjectId
-    )
-
-    $body = @{
-        tool = $ReadOnlyTool
-        parameters = @{}
-        runContext = @{
-            companyId = $CompanyId
-            agentId = $AgentId
-            runId = $RunId
-            projectId = $ProbeProjectId
-        }
-    } | ConvertTo-Json -Depth 5 -Compress
-    $response = Invoke-WebRequest -Uri "$api/plugins/tools/execute" -Headers $headers -Method Post -Body $body -SkipHttpErrorCheck
-    $parsed = $null
-    try { $parsed = $response.Content | ConvertFrom-Json } catch { }
-    [pscustomobject]@{
-        case = $Name
-        status = [int]$response.StatusCode
-        error = $parsed.error
-    }
-}
-
-$negativeResults = @(
-    Invoke-RejectedProbe 'foreign-company' '00000000-0000-4000-8000-000000000001' $env:PAPERCLIP_AGENT_ID $env:PAPERCLIP_RUN_ID $ProjectId
-    Invoke-RejectedProbe 'forged-agent' $env:PAPERCLIP_COMPANY_ID '00000000-0000-4000-8000-000000000002' $env:PAPERCLIP_RUN_ID $ProjectId
-    Invoke-RejectedProbe 'forged-run' $env:PAPERCLIP_COMPANY_ID $env:PAPERCLIP_AGENT_ID '00000000-0000-4000-8000-000000000003' $ProjectId
-    Invoke-RejectedProbe 'foreign-project' $env:PAPERCLIP_COMPANY_ID $env:PAPERCLIP_AGENT_ID $env:PAPERCLIP_RUN_ID '00000000-0000-4000-8000-000000000004'
-)
-foreach ($result in $negativeResults) {
-    if ($result.status -ne 403) {
-        throw "Expected HTTP 403 for $($result.case), received $($result.status)"
-    }
-}
-
-$bytes = New-Object byte[] (4 * 1024 * 1024)
-[Array]::Fill[byte]($bytes, 0xA5)
-$base64 = [Convert]::ToBase64String($bytes)
-$largeBody = @{
-    tool = $ReadOnlyTool
-    parameters = @{ contentBase64 = $base64 }
-    runContext = @{
-        companyId = $env:PAPERCLIP_COMPANY_ID
-        agentId = $env:PAPERCLIP_AGENT_ID
-        runId = $env:PAPERCLIP_RUN_ID
-        projectId = $ProjectId
-    }
-} | ConvertTo-Json -Depth 5 -Compress
-$largeResponse = Invoke-WebRequest -Uri "$api/plugins/tools/execute" -Headers $headers -Method Post -Body $largeBody -SkipHttpErrorCheck
-if ([int]$largeResponse.StatusCode -ne 200) {
-    throw "Expected HTTP 200 for the synthetic 4-MiB request, received $([int]$largeResponse.StatusCode)"
-}
-
-[pscustomobject]@{
+[ordered]@{
+    probe = 'gateway-dispatch-contract'
     status = 'pass'
-    negativeCases = $negativeResults
-    transport = [pscustomobject]@{
-        status = [int]$largeResponse.StatusCode
-        requestBytes = [Text.Encoding]::UTF8.GetByteCount($largeBody)
-        rawBytes = $bytes.Length
-        base64Bytes = [Text.Encoding]::UTF8.GetByteCount($base64)
-        responseBytes = [Text.Encoding]::UTF8.GetByteCount($largeResponse.Content)
-    }
-} | ConvertTo-Json -Depth 5
+    mode = $Mode
+    networkCalls = 0
+    dispatches = 0
+    allowedTool = $safeTool
+    allowedMetadataAccepted = $allowed
+    negativeCases = $rejected
+} | ConvertTo-Json -Depth 6 -Compress
