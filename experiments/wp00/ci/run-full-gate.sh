@@ -1,5 +1,6 @@
 #!/bin/bash
 set -Eeuo pipefail
+trap 'rc=$?; printf "%s\n" "WP01_GATE_FAILURE rc=$rc line=$LINENO command=$BASH_COMMAND" >&2; exit "$rc"' ERR
 
 fail() { printf '%s\n' "wp01 full gate: $*" >&2; exit 1; }
 repo=/repo
