@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,8 +21,13 @@ const sdkEntry = enforcedReadOnly
   ? (assertTarballs(tarballs, expectation), assertPreparedPackages(prepared, expectation))
   : extractVerifiedPackages(tarballs, join(scratch, "node_modules"), expectation);
 const importScript = join(here, "import-sdk.mjs");
-const output = enforcedReadOnly
-  ? execFileSync(process.execPath, [importScript, sdkEntry], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim()
+const direct = enforcedReadOnly ? spawnSync(process.execPath, [importScript, sdkEntry], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) : null;
+if (direct && direct.status !== 0) {
+  process.stderr.write(`${JSON.stringify({ probe: "verified-sdk-import", status: "fail", exitStatus: direct.status, stderr: direct.stderr.trim().slice(-1200) })}\n`);
+  process.exit(direct.status ?? 1);
+}
+const output = direct
+  ? direct.stdout.trim()
   : execFileSync("bwrap", [
     "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts",
     "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--clearenv",
