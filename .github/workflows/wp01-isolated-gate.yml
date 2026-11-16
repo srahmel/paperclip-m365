@@ -66,14 +66,16 @@ jobs:
           evidence="${RUNNER_TEMP}/wp01-evidence"
           install -d -m 0777 "$scratch"
           set +e
-          docker run --rm --user 999:999 --network none --read-only \
+          docker run --rm --user 999:999 --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges \
             --cpus 2 --memory 3g --memory-swap 3g --pids-limit 128 \
             --ulimit cpu=150:150 --ulimit nproc=128:128 --ulimit nofile=1024:1024 --ulimit fsize=1073741824:1073741824 \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m \
+            --tmpfs /dev/shm:ro,noexec,nosuid,nodev,size=64m \
             --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
             --mount "type=bind,src=${work}/source,dst=/source,readonly" \
             --mount "type=bind,src=${work}/tarballs,dst=/tarballs,readonly" \
             --mount "type=bind,src=${work}/packages,dst=/packages,readonly" \
+            --mount "type=bind,src=${work}/readonly-empty,dst=/var/lib/postgresql/data,readonly" \
             --mount "type=bind,src=${scratch},dst=/scratch" \
             --entrypoint /usr/bin/env wp01-runner:${GITHUB_SHA} -i \
             PATH=/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/bin:/bin \

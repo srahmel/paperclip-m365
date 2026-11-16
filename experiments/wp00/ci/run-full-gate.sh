@@ -16,6 +16,9 @@ for mount in "$repo" "$source" "$tarballs" "$packages"; do
 done
 touch "$scratch/write-probe"
 rm "$scratch/write-probe"
+for forbidden in /tmp /var/lib/postgresql/data; do
+  if touch "$forbidden/.wp01-write-probe" 2>/dev/null; then fail "write unexpectedly succeeded outside scratch: $forbidden"; fi
+done
 [ "$(find /sys/class/net -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" = lo ] || fail "container has a non-loopback network interface"
 [ "$(ulimit -n)" -le 1024 ] || fail "open-file limit is not enforced"
 [ "$(ulimit -u)" -le 128 ] || fail "process limit is not enforced"

@@ -10,12 +10,13 @@ store=$work/pnpm-store
 cache=$work/npm-cache
 tarballs=$work/tarballs
 packages=$work/packages/node_modules
+readonly_empty=$work/readonly-empty
 log=$work/fresh-install.log
 
 [ ! -e "$source" ] || fail "source path is not fresh: $source"
 [ ! -e "$store" ] || fail "pnpm store is not fresh: $store"
 [ ! -e "$cache" ] || fail "npm cache is not fresh: $cache"
-mkdir -p "$work" "$store" "$cache" "$tarballs" "$packages"
+mkdir -p "$work" "$store" "$cache" "$tarballs" "$packages" "$readonly_empty"
 
 git init -q "$source"
 git -C "$source" remote add origin https://github.com/paperclipai/paperclip.git
@@ -35,5 +36,6 @@ npm pack @paperclipai/shared@2026.1106.0 --pack-destination "$tarballs" --ignore
 npm pack zod@4.6.7 --pack-destination "$tarballs" --ignore-scripts
 npm pack three@0.185.1 --pack-destination "$tarballs" --ignore-scripts
 node "$repo/experiments/wp00/prepare-artifacts.mjs" "$tarballs" "$packages"
+chmod 0555 "$readonly_empty"
 
 printf '%s\n' '{"probe":"wp01-ci-setup","status":"pass","sourceInstall":"fresh","pnpmStore":"fresh","npmCache":"fresh"}'

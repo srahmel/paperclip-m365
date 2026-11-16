@@ -26,6 +26,7 @@ $installExit = $LASTEXITCODE
 if ($installExit -ne 0) { exit $installExit }
 $policyOutput = & node (Join-Path $PSScriptRoot 'install-log-policy.mjs') $installLog (Join-Path $expected.workspaceRoot 'pnpm-lock.yaml')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Write-Output $policyOutput
 $policy = $policyOutput | ConvertFrom-Json
 if ($policy.requireFallbackProbe) {
     & node (Join-Path $PSScriptRoot 'verify-optional-fallback.mjs') $expected.workspaceRoot ($policy.packages -join ',')

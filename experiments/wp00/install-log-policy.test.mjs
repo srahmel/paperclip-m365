@@ -25,22 +25,26 @@ test("clean install log passes without a fallback probe", () => {
 });
 
 test("exact optional cpu-features failure is package-bound", () => {
-  const prefix = "node_modules/.pnpm/cpu-features@0.0.10/node_modules/cpu-features install:";
-  const result = inspectInstallLog(`${prefix} gyp ERR! build error\n${prefix} Failed`, lock);
+  const start = ".../node_modules/cpu-features install$ node buildcheck.js";
+  const prefix = ".../node_modules/cpu-features install:";
+  const result = inspectInstallLog(`${start}\n${prefix} Unable to detect compiler type\n${prefix} Failed`, lock);
   assert.equal(result.requireFallbackProbe, true);
   assert.deepEqual(result.packages, ["cpu-features@0.0.10"]);
 });
 
 test("ssh2 optional binding fallback is package-bound but ssh2 install failure is rejected", () => {
+  const start = ".../.pnpm/ssh2@1.17.0/node_modules/ssh2 install$ node install.js";
   const prefix = "node_modules/.pnpm/ssh2@1.17.0/node_modules/ssh2 install:";
-  assert.equal(inspectInstallLog(`${prefix} gyp ERR! build error\n${prefix} Failed to build optional crypto binding`, lock).requireFallbackProbe, true);
-  assert.throws(() => inspectInstallLog(`${prefix} Failed\n${prefix} Failed`, lock));
+  assert.equal(inspectInstallLog(`${start}\n${prefix} gyp ERR! build error\n${prefix} Failed to build optional crypto binding`, lock).requireFallbackProbe, true);
+  assert.throws(() => inspectInstallLog(`${start}\n${prefix} Failed\n${prefix} Failed`, lock));
 });
 
 for (const [name, line] of [
   ["unscoped", "gyp ERR! build error"],
-  ["wrong version", "node_modules/.pnpm/cpu-features@0.0.9/node_modules/cpu-features install: gyp ERR!"],
+  ["wrong version", "node_modules/.pnpm/cpu-features@0.0.9/node_modules/cpu-features install$ node buildcheck.js\nnode_modules/.pnpm/cpu-features@0.0.9/node_modules/cpu-features install: gyp ERR!"],
   ["other package", "node_modules/.pnpm/better-sqlite3@12.0.0/node_modules/better-sqlite3 install: gyp ERR!"],
+  ["unscoped MSBuild", "error MSB4018: native build failed"],
+  ["pnpm error", "ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL"],
 ]) {
   test(`${name} native failure is rejected`, () => assert.throws(() => inspectInstallLog(line, lock)));
 }
