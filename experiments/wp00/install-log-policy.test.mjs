@@ -45,9 +45,28 @@ for (const [name, line] of [
   ["other package", "node_modules/.pnpm/better-sqlite3@12.0.0/node_modules/better-sqlite3 install: gyp ERR!"],
   ["unscoped MSBuild", "error MSB4018: native build failed"],
   ["pnpm error", "ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL"],
+  ["modern npm error", "npm error code 1"],
+  ["legacy npm error", "npm ERR! code 1"],
+  ["unscoped lifecycle error", "ELIFECYCLE Command failed with exit code 1"],
+  ["unscoped command failure", "Command failed with exit code 1"],
+  ["near npm error variant", "npm error Lifecycle script `install` failed with error"],
+  ["near lifecycle variant", "ELIFECYCLE Command failed with exit code 127"],
 ]) {
   test(`${name} native failure is rejected`, () => assert.throws(() => inspectInstallLog(line, lock)));
 }
+
+test("generic npm and lifecycle failures stay forbidden inside an optional package block", () => {
+  const start = "node_modules/.pnpm/cpu-features@0.0.10/node_modules/cpu-features install$ node buildcheck.js";
+  const prefix = "node_modules/.pnpm/cpu-features@0.0.10/node_modules/cpu-features install:";
+  for (const failure of [
+    "npm error code 1",
+    "npm ERR! code 1",
+    "ELIFECYCLE Command failed with exit code 1",
+    "Command failed with exit code 1",
+  ]) {
+    assert.throws(() => inspectInstallLog(`${start}\n${prefix} ${failure}`, lock));
+  }
+});
 
 test("changed integrity and optional edge fail closed", () => {
   assert.throws(() => inspectInstallLog("Done", lock.replace("sha512-9IkY", "sha512-XIkY")));

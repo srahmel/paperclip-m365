@@ -39,7 +39,8 @@ export WP01_GATE_PACKAGES=$packages
 export WP01_GATE_SCRATCH=$scratch/negative
 mkdir -p "$WP01_GATE_SCRATCH"
 node --test --test-reporter=tap "$repo/experiments/wp00/gate-self-test.mjs" | tee "$scratch/negative.tap"
-assert_tap_counts 25 "$scratch/negative.tap"
+node "$repo/experiments/wp00/gate-self-test.mjs" --list-cases > "$scratch/negative-cases.json"
+node "$repo/experiments/wp00/verify-negative-matrix.mjs" "$scratch/negative-cases.json" "$scratch/negative.tap"
 export WP01_GATE_SCRATCH=$scratch/positive
 export WP01_GATE_ENFORCED_READ_ONLY=1
 mkdir -p "$WP01_GATE_SCRATCH"
@@ -67,7 +68,7 @@ node "$source/node_modules/typescript/bin/tsc" --noEmit --target ES2022 --module
 node -e 'const r=require(process.argv[1]); if(r.numTotalTests!==28||r.numPassedTests!==28||r.numFailedTests!==0) throw new Error(`SDK counts mismatch: ${JSON.stringify({total:r.numTotalTests,passed:r.numPassedTests,failed:r.numFailedTests})}`)' "$scratch/sdk-vitest.json"
 node "$repo/experiments/wp00/gateway-probe.mjs"
 node --test --test-reporter=tap "$repo/experiments/wp00/install-log-policy.test.mjs" | tee "$scratch/install-policy.tap"
-assert_tap_counts 9 "$scratch/install-policy.tap"
+assert_tap_counts 16 "$scratch/install-policy.tap"
 
 pg_ctl -D "$pgdata" -m fast -w stop >/dev/null
 trap - EXIT HUP INT TERM

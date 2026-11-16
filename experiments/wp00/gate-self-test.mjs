@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -10,8 +10,16 @@ import { GateError, assertPreparedPackages, assertRegistryLock, assertSourceClea
 const here = fileURLToPath(new URL(".", import.meta.url));
 const expectation = loadExpectation(join(here, "expected-host-fingerprint.json"));
 const lockPath = join(here, "registry-pin", "package-lock.json");
+const listCases = process.argv.includes("--list-cases");
 const scratch = process.env.WP01_GATE_SCRATCH;
-assert(scratch, "WP01_GATE_SCRATCH is required");
+if (!listCases) assert(scratch, "WP01_GATE_SCRATCH is required");
+const caseNames = [];
+
+function gateTest(name, action) {
+  assert.equal(caseNames.includes(name), false, `duplicate gate case: ${name}`);
+  caseNames.push(name);
+  if (!listCases) test(name, action);
+}
 
 function git(cwd, ...args) { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" }).trim(); }
 function fixture(name) {
@@ -35,14 +43,26 @@ function rejectsBeforeMarker(action, message) {
   assert.throws(() => { action(); marker = true; }, GateError, message);
   assert.equal(marker, false, `${message}: target marker executed`);
 }
+function firstFile(root) {
+  for (const entry of readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+    const path = join(root, entry.name);
+    if (entry.isFile()) return path;
+    if (entry.isDirectory()) {
+      const nested = firstFile(path);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+function caseSlug(name) { return name.replaceAll("@", "").replaceAll("/", "_"); }
 
-test("clean source is accepted", () => {
+gateTest("clean source is accepted", () => {
   const root = fixture("source-clean");
   assert.doesNotThrow(() => assertSourceClean(root, fixtureExpectation(root)));
 });
 
 for (const kind of ["untracked", "staged", "unstaged"]) {
-  test(`${kind} source fails before target execution`, () => {
+  gateTest(`${kind} source fails before target execution`, () => {
     const root = fixture(`source-${kind}`);
     if (kind === "untracked") writeFileSync(join(root, "untracked.txt"), "dirty\n");
     if (kind === "unstaged") writeFileSync(join(root, "tracked.txt"), "dirty\n");
@@ -51,7 +71,7 @@ for (const kind of ["untracked", "staged", "unstaged"]) {
   });
 }
 
-test("sparse checkout and additional worktrees fail closed", () => {
+gateTest("sparse checkout and additional worktrees fail closed", () => {
   const sparse = fixture("source-sparse");
   git(sparse, "config", "core.sparseCheckout", "true");
   rejectsBeforeMarker(() => assertSourceClean(sparse, fixtureExpectation(sparse)), "sparse checkout");
@@ -61,7 +81,7 @@ test("sparse checkout and additional worktrees fail closed", () => {
   rejectsBeforeMarker(() => assertSourceClean(root, fixtureExpectation(root)), "additional worktree");
 });
 
-test("an uninitialized submodule fails before target execution", () => {
+gateTest("an uninitialized submodule fails before target execution", () => {
   const child = fixture("submodule-child");
   const root = fixture("source-submodule");
   git(root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", child, "child");
@@ -73,7 +93,7 @@ test("an uninitialized submodule fails before target execution", () => {
 
 for (const [name, wanted] of Object.entries(expectation.registryPackages)) {
   for (const field of ["version", "resolved", "integrity"]) {
-    test(`${name} changed ${field} fails before target execution`, () => {
+    gateTest(`${name} changed ${field} fails before target execution`, () => {
       const lock = JSON.parse(readFileSync(lockPath, "utf8"));
       lock.packages[`node_modules/${name}`][field] += "-tampered";
       const path = join(scratch, `lock-${name.replaceAll("/", "_")}-${field}.json`);
@@ -82,7 +102,7 @@ for (const [name, wanted] of Object.entries(expectation.registryPackages)) {
     });
   }
   for (const dependency of Object.keys(wanted.dependencies ?? {})) {
-    test(`${name} changed ${dependency} edge fails before target execution`, () => {
+    gateTest(`${name} changed ${dependency} edge fails before target execution`, () => {
       const lock = JSON.parse(readFileSync(lockPath, "utf8"));
       lock.packages[`node_modules/${name}`].dependencies[dependency] += "-tampered";
       const path = join(scratch, `edge-${name.replaceAll("/", "_")}-${dependency.replaceAll("/", "_")}.json`);
@@ -92,27 +112,39 @@ for (const [name, wanted] of Object.entries(expectation.registryPackages)) {
   }
 }
 
-test("missing and SRI-changed tarballs fail before extraction", () => {
-  rejectsBeforeMarker(() => assertTarballs(join(scratch, "missing"), expectation), "missing tarball");
-  const dir = join(scratch, "tampered-tarballs");
-  cpSync(process.env.WP01_GATE_TARBALLS, dir, { recursive: true });
-  const first = Object.values(expectation.registryPackages)[0].tarball;
-  writeFileSync(join(dir, first), Buffer.concat([readFileSync(join(dir, first)), Buffer.from("tamper")]));
-  rejectsBeforeMarker(() => assertTarballs(dir, expectation), "tampered tarball");
-});
+for (const [index, [name, wanted]] of Object.entries(expectation.registryPackages).entries()) {
+  gateTest(`${name} tampered tarball SRI fails before extraction`, () => {
+    if (index === 0) rejectsBeforeMarker(() => assertTarballs(join(scratch, "missing"), expectation), "missing tarball");
+    const dir = join(scratch, `tampered-tarball-${caseSlug(name)}`);
+    cpSync(process.env.WP01_GATE_TARBALLS, dir, { recursive: true });
+    const tarball = join(dir, wanted.tarball);
+    writeFileSync(tarball, Buffer.concat([readFileSync(tarball), Buffer.from("tamper")]));
+    rejectsBeforeMarker(() => assertTarballs(dir, expectation), `${name} tampered tarball`);
+  });
 
-test("modified SDK dist/index.js fails before import", () => {
-  const root = join(scratch, "prepared-tamper");
-  cpSync(process.env.WP01_GATE_PACKAGES, root, { recursive: true });
-  const entry = join(root, "@paperclipai", "plugin-sdk", "dist", "index.js");
-  chmodSync(entry, 0o644);
-  writeFileSync(entry, `${readFileSync(entry, "utf8")}\n// tampered\n`);
-  rejectsBeforeMarker(() => assertPreparedPackages(root, expectation), "SDK dist tamper");
-});
+  gateTest(`${name} tampered prepared content manifest fails before import`, () => {
+    const root = join(scratch, `tampered-content-${caseSlug(name)}`);
+    cpSync(process.env.WP01_GATE_PACKAGES, root, { recursive: true });
+    const packageRoot = join(root, ...name.split("/"));
+    const target = firstFile(packageRoot);
+    assert(target, `${name} fixture contains no file to tamper`);
+    chmodSync(target, 0o644);
+    writeFileSync(target, Buffer.concat([readFileSync(target), Buffer.from("\ncontent-manifest-tamper\n")]));
+    rejectsBeforeMarker(() => assertPreparedPackages(root, expectation), `${name} content manifest tamper`);
+  });
+}
 
-test("wrong commit and tag fail before target execution", () => {
+gateTest("wrong commit and tag fail before target execution", () => {
   const root = fixture("source-identity");
   const expected = fixtureExpectation(root);
   rejectsBeforeMarker(() => assertSourceClean(root, { source: { ...expected.source, commit: "0".repeat(40) } }), "wrong commit");
   rejectsBeforeMarker(() => assertSourceClean(root, { source: { ...expected.source, tag: "missing-tag" } }), "wrong tag");
 });
+
+if (listCases) {
+  process.stdout.write(`${JSON.stringify({
+    probe: "wp01-negative-matrix-cases",
+    expectedCount: caseNames.length,
+    caseNames,
+  })}\n`);
+}

@@ -23,6 +23,7 @@ jobs:
           fetch-depth: 0
 
       - name: Build pinned runner image
+        id: build
         run: |
           set -Eeuo pipefail
           evidence="${RUNNER_TEMP}/wp01-evidence"
@@ -39,6 +40,7 @@ jobs:
           fi
 
       - name: Build fresh source and verified artifacts
+        id: setup
         run: |
           set -Eeuo pipefail
           work="${RUNNER_TEMP}/wp01-build"
@@ -59,6 +61,7 @@ jobs:
           fi
 
       - name: Run complete matrix without network
+        id: gate
         run: |
           set -Eeuo pipefail
           work="${RUNNER_TEMP}/wp01-build"
@@ -89,6 +92,39 @@ jobs:
             printf '%s\n' "::error title=Isolated full matrix failed::${detail}"
             exit "$gate_status"
           fi
+
+      - name: Publish reviewer-readable evidence summary
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          set -Eeuo pipefail
+          evidence="${RUNNER_TEMP}/wp01-evidence"
+          install -d -m 0777 "$evidence"
+          summary="$evidence/review-summary.md"
+          workflow_sha=$(sha256sum .github/workflows/wp01-isolated-gate.yml | cut -d' ' -f1)
+          {
+            printf '# WP01 isolated reproducibility evidence\n\n'
+            printf -- '- Head SHA: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Workflow SHA-256: `%s`\n' "$workflow_sha"
+            printf -- '- Run: [%s/%s](%s/%s/actions/runs/%s)\n\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf '## Step outcomes\n\n'
+            printf '| build | setup | isolated gate |\n| --- | --- | --- |\n| %s | %s | %s |\n\n' "$BUILD_OUTCOME" "$SETUP_OUTCOME" "$GATE_OUTCOME"
+            printf '## Isolation contract\n\n'
+            printf -- '- Network: `none`; environment: explicit allowlist via `env -i`\n'
+            printf -- '- Read-only: root, repository, source, tarballs, prepared packages, PostgreSQL default data path\n'
+            printf -- '- Privileges: UID/GID 999, all capabilities dropped, `no-new-privileges`\n'
+            printf -- '- Limits: 2 CPUs, 3 GiB RAM/no swap, 128 PIDs, 1024 FDs, 1 GiB file size, 150 CPU seconds, 180 wall seconds\n\n'
+            printf '## Machine-readable gate results\n\n```json\n'
+            if [ -f "$evidence/setup.log" ]; then grep -E '^\{"probe":' "$evidence/setup.log" || true; fi
+            if [ -f "$evidence/full-gate.log" ]; then grep -E '^\{"probe":' "$evidence/full-gate.log" || true; fi
+            printf '```\n\n## Log checksums\n\n```text\n'
+            find "$evidence" -maxdepth 1 -type f -name '*.log' -print0 | sort -z | xargs -0 -r sha256sum
+            printf '```\n'
+          } > "$summary"
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload auditable gate log
         if: always()

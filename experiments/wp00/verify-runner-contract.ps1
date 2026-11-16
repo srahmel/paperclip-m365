@@ -8,6 +8,7 @@ function Check([string]$Name, [string]$Wanted, [string]$Actual) {
 }
 Check 'node' $expected.node ((& node --version).Trim().TrimStart('v'))
 Check 'npm' $expected.npm ((& npm --version).Trim())
+Check 'corepack' $expected.corepack ((& corepack --version).Trim())
 Check 'pnpm' $expected.pnpm ((& corepack pnpm@$($expected.pnpm) --version).Trim())
 Check 'git' $expected.git ((& git --version).Trim().Substring(12))
 Check 'python' $expected.python ((& python --version).Trim().Substring(7))

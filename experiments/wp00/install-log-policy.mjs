@@ -16,7 +16,12 @@ const OPTIONAL_NATIVE = Object.freeze({
   },
 });
 
-const FAILURE = /gyp ERR!|install: Failed|Unable to detect compiler type|Failed to build optional crypto binding|error MSB\d+|npm ERR!|ERR_PNPM/;
+const FATAL_FAILURE = /npm (?:error|ERR!)|ERR_PNPM|\bELIFECYCLE\b|Command failed with exit code \d+/i;
+const NATIVE_FAILURE = /gyp ERR!|install: Failed|Unable to detect compiler type|Failed to build optional crypto binding|error MSB\d+/;
+const ALLOWED_NATIVE_FAILURE = Object.freeze({
+  "cpu-features": /gyp ERR!|install: Failed|Unable to detect compiler type|error MSB\d+/,
+  ssh2: /gyp ERR!|Failed to build optional crypto binding|error MSB\d+/,
+});
 
 function assertPinnedLock(lockText) {
   for (const [name, expected] of Object.entries(OPTIONAL_NATIVE)) {
@@ -40,11 +45,13 @@ export function inspectInstallLog(logText, lockText) {
       const explicit = line.match(/\.pnpm[\\/]([^\\/\s]+?@[^\\/\s]+)[\\/]node_modules/);
       if (explicit) assert.equal(explicit[1], `${activePackage}@${OPTIONAL_NATIVE[activePackage].version}`, `unexpected lifecycle locator in: ${line}`);
     }
-    if (!FAILURE.test(line)) continue;
+    assert.doesNotMatch(line, FATAL_FAILURE, `install failure is forbidden: ${line}`);
+    if (!NATIVE_FAILURE.test(line)) continue;
     const match = line.match(/node_modules[\\/](cpu-features|ssh2)\s+install:/);
     assert.ok(match && activePackage === match[1], `unscoped native failure is forbidden: ${line}`);
     const name = match[1];
     const expected = OPTIONAL_NATIVE[name];
+    assert.match(line, ALLOWED_NATIVE_FAILURE[name], `unexpected ${name} native failure: ${line}`);
     const explicit = line.match(/\.pnpm[\\/]([^\\/\s]+?@[^\\/\s]+)[\\/]node_modules/);
     if (explicit) assert.equal(explicit[1], `${name}@${expected.version}`, `unexpected optional native locator in: ${line}`);
     if (/install:\s+Failed\s*$/.test(line)) {
