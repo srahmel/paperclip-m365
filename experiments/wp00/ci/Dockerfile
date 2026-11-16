@@ -33,6 +33,7 @@ ADD --checksum=sha256:492bca8e813411386e61e488f95b375262aa8f262e6e8b20d162e26bdf
 
 RUN npm install --global --force /tmp/corepack.tgz /tmp/pnpm.tgz /tmp/node-gyp.tgz \
     && npm install --global --force /tmp/npm.tgz \
+    && ln -sfn /usr/local/lib/node_modules/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm \
     && rm /tmp/npm.tgz /tmp/corepack.tgz /tmp/pnpm.tgz /tmp/node-gyp.tgz \
     && test "$(node --version)" = v24.22.1 \
     && test "$(npm --version)" = 11.19.1 \
