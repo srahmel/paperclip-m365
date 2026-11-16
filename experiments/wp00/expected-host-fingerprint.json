@@ -17,12 +17,38 @@
     "@paperclipai/plugin-sdk": {
       "version": "2026.1106.0",
       "resolved": "https://registry.npmjs.org/@paperclipai/plugin-sdk/-/plugin-sdk-2026.1106.0.tgz",
-      "integrity": "sha512-dmRBcyEIsqKAxBfrqwVGNxnARCwsGCt2bhrch49E0jhGzo0wwn501W9B3YADggSTSbm81FxMu8/G9z/jDrNeKA=="
+      "integrity": "sha512-dmRBcyEIsqKAxBfrqwVGNxnARCwsGCt2bhrch49E0jhGzo0wwn501W9B3YADggSTSbm81FxMu8/G9z/jDrNeKA==",
+      "tarball": "paperclipai-plugin-sdk-2026.1106.0.tgz",
+      "contentManifest": "sha256-c26867f8b751e0bad0278036550f839facb02dddd9c8441adf6bfcc09912a639",
+      "dependencies": {
+        "@paperclipai/shared": "2026.1106.0",
+        "zod": "^4.4.3"
+      }
     },
     "@paperclipai/shared": {
       "version": "2026.1106.0",
       "resolved": "https://registry.npmjs.org/@paperclipai/shared/-/shared-2026.1106.0.tgz",
-      "integrity": "sha512-fleBeHYbmnwdvEuzyQ4ABUFbHzqft47ni/ZktF1jWQsFkyfHmHBz5xFm3nfD3WZQ9UGnVZmXfEhfk+nizpeGEQ=="
+      "integrity": "sha512-fleBeHYbmnwdvEuzyQ4ABUFbHzqft47ni/ZktF1jWQsFkyfHmHBz5xFm3nfD3WZQ9UGnVZmXfEhfk+nizpeGEQ==",
+      "tarball": "paperclipai-shared-2026.1106.0.tgz",
+      "contentManifest": "sha256-96d76abc022b71713b815743a2e431516c61600d589f60d7bff306899becdbb7",
+      "dependencies": {
+        "three": "0.185.1",
+        "zod": "^4.4.3"
+      }
+    },
+    "zod": {
+      "version": "4.6.7",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "tarball": "zod-4.6.7.tgz",
+      "contentManifest": "sha256-81e78a64be2f52a20e48681f0ee4d88565b7624d4faf5d5d44e90a61521868f9"
+    },
+    "three": {
+      "version": "0.185.1",
+      "resolved": "https://registry.npmjs.org/three/-/three-0.185.1.tgz",
+      "integrity": "sha512-5aojFCXKwnjBRZvUnt3WFfEcvUJgkN5LlijRFN95hMy8WVkG4I0QNcJE+OuWvuJ0bOdStrbfXn0pkd6/QyiAlg==",
+      "tarball": "three-0.185.1.tgz",
+      "contentManifest": "sha256-6d7a8b1fd01c20fc8889718cf2b7a8401372f761eaf857e5ad9cec524bd99b23"
     }
   },
   "nodeVersion": "24.22.1",

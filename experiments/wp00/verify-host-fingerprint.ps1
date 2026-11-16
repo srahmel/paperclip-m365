@@ -10,6 +10,20 @@ $source = (Resolve-Path -LiteralPath $PaperclipSource).Path
 $expectation = Get-Content -Raw -LiteralPath $ExpectationPath | ConvertFrom-Json
 $mismatches = [System.Collections.Generic.List[object]]::new()
 
+$dirtyStatus = (& git -C $source status --porcelain=v1 --untracked-files=all) -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'git status failed' }
+if ($dirtyStatus.Length -ne 0) { throw "source is dirty: $($dirtyStatus.Split("`n")[0])" }
+$sparse = (& git -C $source config --bool core.sparseCheckout 2>$null) -join ''
+if ($sparse -ceq 'true') { throw 'sparse checkout is not accepted by the reproducibility gate' }
+$worktrees = @(& git -C $source worktree list --porcelain | Where-Object { $_ -like 'worktree *' })
+if ($LASTEXITCODE -ne 0 -or $worktrees.Count -ne 1) { throw 'additional or unreadable worktree state' }
+if (Test-Path -LiteralPath (Join-Path $source '.gitmodules')) {
+    $submodules = @(& git -C $source submodule status --recursive)
+    if ($LASTEXITCODE -ne 0 -or @($submodules | Where-Object { -not $_.StartsWith(' ') }).Count -ne 0) {
+        throw 'uninitialized or divergent submodule state'
+    }
+}
+
 function Add-Mismatch {
     param([string]$Field, [object]$Expected, [object]$Actual)
     $mismatches.Add([ordered]@{ field = $Field; expected = $Expected; actual = $Actual })

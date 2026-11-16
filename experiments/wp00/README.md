@@ -1,5 +1,11 @@
 # WP00 contract probe
 
+## Reproducible review gate
+
+`runner-contract.json`, `verify-runner-contract.ps1`, `fresh-source-install.ps1` and `run-isolated-gate.ps1` implement the HUM-285 fail-closed runner contract. The isolated command has `selftest` and `positive` modes. `selftest` runs the complete mutation matrix. `positive` verifies source, registry lock and tarball SRI, extracts only after SRI passes, verifies complete content manifests, makes packages read-only, and only then imports the verified SDK entry. Missing isolation prerequisites fail before target code executes.
+
+The former direct-host `run.ps1` entry point is intentionally disabled. It cannot enforce network, environment, filesystem and resource isolation and therefore must not execute target code.
+
 This experiment is an offline, synthetic proof of the Paperclip contracts selected for the M365 plugin. It does not install a plugin, call a running Paperclip instance, contact Microsoft, use credentials, or perform external I/O.
 
 ## Prerequisites and exact command

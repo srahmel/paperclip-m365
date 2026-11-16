@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+throw 'Direct host execution is disabled by HUM-285. Use run-isolated-gate.ps1; no target code may run outside the enforced isolation gate.'
 $resolvedSource = (Resolve-Path -LiteralPath $PaperclipSource).Path
 $expectationPath = Join-Path $PSScriptRoot 'expected-host-fingerprint.json'
 $fingerprintScript = Join-Path $PSScriptRoot 'verify-host-fingerprint.ps1'

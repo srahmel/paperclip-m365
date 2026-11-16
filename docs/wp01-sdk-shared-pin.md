@@ -2,7 +2,21 @@
 
 Stand: 16. November 2026.
 
-## Ergebnis
+## HUM-285-Korrekturstand
+
+Der Reviewpfad ist jetzt als fail-closed Gate implementiert. `gate-lib.mjs` prüft vor Zielausführung den exakt leeren Output von `git status --porcelain=v1 --untracked-files=all`, Commit, Tag, Tree, Origin, Sparse-Checkout, zusätzliche Worktrees und Submodule. Die Registryerwartung bindet SDK, Shared, zod und three jeweils an Version, URL, SRI, vollständiges Inhaltsmanifest und alle vier direkten Abhängigkeitskanten. Tarball-SRI wird vor Extraktion geprüft; erst danach wird in den verwerfbaren Scratch extrahiert, der vollständige Baum erneut geprüft, read-only gesetzt und genau dessen `dist/index.js` importiert.
+
+`run-isolated-gate.ps1` startet den Zielpfad über WSL2 und bubblewrap mit getrennten User-, PID-, Netzwerk-, IPC- und UTS-Namespaces, leerer Environment-Allowlist, read-only Root/Repository/Quelle/Toolchain und genau einem beschreibbaren Scratch-Mount. `prlimit` und `timeout` erzwingen 150 CPU-Sekunden, 3 GiB virtuellen Adressraum, 128 Prozesse, 1024 offene Dateien, 1 GiB Dateigröße und 180 Sekunden Wallclock. Ist WSL2, bubblewrap, prlimit, timeout oder Node 24.22.1 nicht verfügbar, startet kein Zielcode.
+
+Die isolierte Negativmatrix besteht aus 25 Fällen: untracked/staged/unstaged, uninitialisiertes Submodul, Sparse-/Worktreeabweichung, falscher Commit/Tag, fehlendes oder SRI-verändertes Artefakt, jedes Version-/URL-/Integrity-Feld aller vier Pakete, alle vier Kanten und ein real verändertes `dist/index.js`. Jeder Fall prüft zusätzlich, dass der Zielmarker nicht ausgeführt wurde. Der positive isolierte Artefaktpfad bestand gegen einen vollständigen frischen Checkout.
+
+Der maschinenlesbare Windows-Vertrag steht in `runner-contract.json`; `verify-runner-contract.ps1` prüft Node 24.22.1, npm 11.19.1, pnpm 9.15.4, Git 2.47.1.windows.2, Python 3.14.0, PostgreSQL 17, VS 2022/MSVC 14.44.35207, Windows SDK 10.0.26100.0, mindestens 6 GiB plus 2 GiB Reserve und den expliziten VS-Developer-Command-Pfad. `fresh-source-install.ps1` verlangt nicht vorhandene feste Pfade unter `F:\w`, initialisiert VS x64, trennt pnpm-Store, npm-Cache und Node-Header 24.22.1 und bricht bei Abweichungen ab.
+
+### Noch blockierendes Plattformgate
+
+Der vollständige Linux-x64-Folgelauf ist **nicht bestanden**: Die vorhandene WSL2-Distribution kann die Isolation erzwingen, enthält aber noch kein PostgreSQL 17 und keinen vollständig gepinnten Linux-Buildtoolstand. Daher werden PostgreSQL 20/20, Typecheck und SDK 28/28 in diesem Korrekturlauf nicht als isoliert grün behauptet. Der WP01-Scaffold bleibt entsprechend gesperrt. Docker Desktop ist installiert, die Engine war jedoch gestoppt und wurde nicht eigenmächtig neu gestartet.
+
+## Ergebnis des ursprünglichen Pins
 
 Paperclip M365 bindet den ersten WP01-Stand an die veröffentlichten Pakete `@paperclipai/plugin-sdk@2026.1106.0` und `@paperclipai/shared@2026.1106.0` sowie an das öffentliche Paperclip-Tag `v2026.1106.0`. Das Tag zeigt auf den sauberen Commit `d69631b01b9c658f80bf8bed389863dce82643e1`. Die vollständige synthetische WP00-Probe ist gegen die aus der Registry installierte SDK-Ausgabe und die Hostvalidatoren dieses Commits grün.
 
@@ -39,7 +53,7 @@ npm ci --ignore-scripts --prefix F:\tmp\hum282-registry
 
 Ein Voll-Checkout beziehungsweise pnpm-Store unter dem langen Runner-Scratch-Prefix scheiterte auf Windows reproduzierbar mit `Filename too long` beziehungsweise `ENAMETOOLONG`. Der kurze Pfad und der Sparse-Checkout sind deshalb eine dokumentierte Windows-Buildvoraussetzung, keine Änderung an Commit oder Lockfile. Auf Dateisystemen ohne diese Grenze kann derselbe Commit vollständig ausgecheckt werden.
 
-## Ausgeführte Prüfungen
+## Ausgeführte Prüfungen des ursprünglichen Pins
 
 | Prüfung | Ergebnis |
 | --- | --- |
@@ -50,7 +64,7 @@ Ein Voll-Checkout beziehungsweise pnpm-Store unter dem langen Runner-Scratch-Pre
 | Typecheck der Vertragsprobe | PASS |
 | SDK `testing-actions.test.ts` und `worker-rpc-host.test.ts` am Quell-Pin | PASS, 28/28 Tests |
 
-Alle Prüfungen verwendeten ausschließlich synthetische Daten. Es gab keine Microsoft-Verbindung, keine echte Paperclip-Installation, keinen Host-Gateway-Aufruf, kein Deployment und keine Mutation außerhalb temporärer lokaler Testverzeichnisse.
+Diese ursprünglichen Prüfungen verwendeten ausschließlich synthetische Daten. Sie sind historische Hostnachweise und werden nicht als isolierter HUM-285-Gesamtlauf umgedeutet. Es gab keine Microsoft-Verbindung, keine echte Paperclip-Installation, keinen Host-Gateway-Aufruf oder Deployment.
 
 ## Restschätzung und kritischer Pfad
 
