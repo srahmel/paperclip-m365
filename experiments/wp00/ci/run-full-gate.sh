@@ -50,7 +50,8 @@ node "$source/node_modules/typescript/bin/tsc" --noEmit --target ES2022 --module
   --types node --typeRoots "$source/packages/plugins/sdk/node_modules/@types" --skipLibCheck \
   "$repo/experiments/wp00/operation-contract.ts" "$repo/experiments/wp00/operation-contract.test.ts"
 (cd "$source" && pnpm exec vitest run --root packages/plugins/sdk --config vitest.config.ts \
-  tests/testing-actions.test.ts tests/worker-rpc-host.test.ts --testTimeout=30000 --maxWorkers=1)
+  --configLoader runner tests/testing-actions.test.ts tests/worker-rpc-host.test.ts \
+  --testTimeout=30000 --maxWorkers=1)
 node "$repo/experiments/wp00/gateway-probe.mjs"
 node --test "$repo/experiments/wp00/install-log-policy.test.mjs"
 
