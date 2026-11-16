@@ -63,7 +63,9 @@ jobs:
           set -Eeuo pipefail
           work="${RUNNER_TEMP}/wp01-build"
           scratch="${RUNNER_TEMP}/wp01-scratch"
+          evidence="${RUNNER_TEMP}/wp01-evidence"
           install -d -m 0777 "$scratch"
+          set +e
           docker run --rm --user 999:999 --network none --read-only \
             --cpus 2 --memory 3g --memory-swap 3g --pids-limit 128 \
             --ulimit cpu=150:150 --ulimit nproc=128:128 --ulimit nofile=1024:1024 --ulimit fsize=1073741824:1073741824 \
@@ -77,7 +79,14 @@ jobs:
             PATH=/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/bin:/bin \
             HOME=/scratch/home TMPDIR=/scratch LANG=C.UTF-8 \
             /usr/bin/timeout --signal=KILL 180s /bin/bash /repo/experiments/wp00/ci/run-full-gate.sh \
-            | tee "${RUNNER_TEMP}/wp01-evidence/full-gate.log"
+            2>&1 | tee "$evidence/full-gate.log"
+          gate_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$gate_status" -ne 0 ]; then
+            detail=$(tail -n 8 "$evidence/full-gate.log" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
+            printf '%s\n' "::error title=Isolated full matrix failed::${detail}"
+            exit "$gate_status"
+          fi
 
       - name: Upload auditable gate log
         if: always()
