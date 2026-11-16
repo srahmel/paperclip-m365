@@ -3,6 +3,13 @@ set -Eeuo pipefail
 trap 'rc=$?; printf "%s\n" "WP01_GATE_FAILURE rc=$rc line=$LINENO command=$BASH_COMMAND" >&2; exit "$rc"' ERR
 
 fail() { printf '%s\n' "wp01 full gate: $*" >&2; exit 1; }
+assert_tap_counts() {
+  expected=$1
+  log=$2
+  grep -qx "# tests $expected" "$log" || fail "expected $expected tests in $log"
+  grep -qx "# pass $expected" "$log" || fail "expected $expected passing tests in $log"
+  grep -qx "# fail 0" "$log" || fail "expected zero failing tests in $log"
+}
 repo=/repo
 source=/source
 tarballs=/tarballs
@@ -31,7 +38,8 @@ export WP01_GATE_TARBALLS=$tarballs
 export WP01_GATE_PACKAGES=$packages
 export WP01_GATE_SCRATCH=$scratch/negative
 mkdir -p "$WP01_GATE_SCRATCH"
-node --test "$repo/experiments/wp00/gate-self-test.mjs"
+node --test --test-reporter=tap "$repo/experiments/wp00/gate-self-test.mjs" | tee "$scratch/negative.tap"
+assert_tap_counts 25 "$scratch/negative.tap"
 export WP01_GATE_SCRATCH=$scratch/positive
 export WP01_GATE_ENFORCED_READ_ONLY=1
 mkdir -p "$WP01_GATE_SCRATCH"
@@ -48,15 +56,18 @@ export PAPERCLIP_SOURCE=$source
 export WP00_SDK_PACKAGE_ROOT=$packages/@paperclipai/plugin-sdk
 export WP00_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/postgres
 runner=$(node -p "require('$repo/experiments/wp00/expected-host-fingerprint.json').runner.relativeCliPath")
-node "$source/$runner" --test --test-timeout=120000 "$repo/experiments/wp00/operation-contract.test.ts"
+node "$source/$runner" --test --test-reporter=tap --test-timeout=120000 "$repo/experiments/wp00/operation-contract.test.ts" | tee "$scratch/postgresql.tap"
+assert_tap_counts 20 "$scratch/postgresql.tap"
 node "$source/node_modules/typescript/bin/tsc" --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext \
   --types node --typeRoots "$source/packages/plugins/sdk/node_modules/@types" --skipLibCheck \
   "$repo/experiments/wp00/operation-contract.ts" "$repo/experiments/wp00/operation-contract.test.ts"
 (cd "$source" && pnpm exec vitest run --root packages/plugins/sdk --config vitest.config.ts \
   --configLoader runner tests/testing-actions.test.ts tests/worker-rpc-host.test.ts \
-  --testTimeout=30000 --maxWorkers=1)
+  --testTimeout=30000 --maxWorkers=1 --reporter=json --outputFile="$scratch/sdk-vitest.json")
+node -e 'const r=require(process.argv[1]); if(r.numTotalTests!==28||r.numPassedTests!==28||r.numFailedTests!==0) throw new Error(`SDK counts mismatch: ${JSON.stringify({total:r.numTotalTests,passed:r.numPassedTests,failed:r.numFailedTests})}`)' "$scratch/sdk-vitest.json"
 node "$repo/experiments/wp00/gateway-probe.mjs"
-node --test "$repo/experiments/wp00/install-log-policy.test.mjs"
+node --test --test-reporter=tap "$repo/experiments/wp00/install-log-policy.test.mjs" | tee "$scratch/install-policy.tap"
+assert_tap_counts 9 "$scratch/install-policy.tap"
 
 pg_ctl -D "$pgdata" -m fast -w stop >/dev/null
 trap - EXIT HUP INT TERM
