@@ -9,7 +9,7 @@ source=$work/source
 store=$work/pnpm-store
 cache=$work/npm-cache
 tarballs=$work/tarballs
-packages=$work/packages
+packages=$work/packages/node_modules
 log=$work/fresh-install.log
 
 [ ! -e "$source" ] || fail "source path is not fresh: $source"

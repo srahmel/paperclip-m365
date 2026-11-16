@@ -6,7 +6,7 @@ fail() { printf '%s\n' "wp01 full gate: $*" >&2; exit 1; }
 repo=/repo
 source=/source
 tarballs=/tarballs
-packages=/packages
+packages=/packages/node_modules
 scratch=/scratch
 
 for mount in "$repo" "$source" "$tarballs" "$packages"; do
