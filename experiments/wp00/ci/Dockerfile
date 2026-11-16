@@ -15,6 +15,7 @@ RUN printf '%s\n' \
     && apt-get install -y --no-install-recommends \
       build-essential=12.9 \
       bubblewrap=0.8.0-2+deb12u1 \
+      ca-certificates=20230311+deb12u1 \
       coreutils=9.1-1 \
       git=1:2.39.5-0+deb12u3 \
       python3=3.11.2-1+b1 \
