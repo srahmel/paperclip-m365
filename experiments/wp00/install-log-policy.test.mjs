@@ -32,6 +32,18 @@ test("exact optional cpu-features failure is package-bound", () => {
   assert.deepEqual(result.packages, ["cpu-features@0.0.10"]);
 });
 
+test("cpu-features rejects the ssh2 optional binding failure", () => {
+  const start = ".../node_modules/cpu-features install$ node buildcheck.js";
+  const prefix = ".../node_modules/cpu-features install:";
+  assert.throws(() => inspectInstallLog(`${start}\n${prefix} Failed to build optional crypto binding`, lock));
+});
+
+test("cpu-features rejects a foreign failure after the allowed terminal text", () => {
+  const start = ".../node_modules/cpu-features install$ node buildcheck.js";
+  const prefix = ".../node_modules/cpu-features install:";
+  assert.throws(() => inspectInstallLog(`${start}\n${prefix} Failed unexpected foreign failure`, lock));
+});
+
 test("ssh2 optional binding fallback is package-bound but ssh2 install failure is rejected", () => {
   const start = ".../.pnpm/ssh2@1.17.0/node_modules/ssh2 install$ node install.js";
   const prefix = "node_modules/.pnpm/ssh2@1.17.0/node_modules/ssh2 install:";

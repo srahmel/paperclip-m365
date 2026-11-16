@@ -68,7 +68,7 @@ node "$source/node_modules/typescript/bin/tsc" --noEmit --target ES2022 --module
 node -e 'const r=require(process.argv[1]); if(r.numTotalTests!==28||r.numPassedTests!==28||r.numFailedTests!==0) throw new Error(`SDK counts mismatch: ${JSON.stringify({total:r.numTotalTests,passed:r.numPassedTests,failed:r.numFailedTests})}`)' "$scratch/sdk-vitest.json"
 node "$repo/experiments/wp00/gateway-probe.mjs"
 node --test --test-reporter=tap "$repo/experiments/wp00/install-log-policy.test.mjs" | tee "$scratch/install-policy.tap"
-assert_tap_counts 16 "$scratch/install-policy.tap"
+assert_tap_counts 18 "$scratch/install-policy.tap"
 
 pg_ctl -D "$pgdata" -m fast -w stop >/dev/null
 trap - EXIT HUP INT TERM
