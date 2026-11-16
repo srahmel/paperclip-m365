@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -105,6 +105,7 @@ test("modified SDK dist/index.js fails before import", () => {
   const root = join(scratch, "prepared-tamper");
   cpSync(process.env.WP01_GATE_PACKAGES, root, { recursive: true });
   const entry = join(root, "@paperclipai", "plugin-sdk", "dist", "index.js");
+  chmodSync(entry, 0o644);
   writeFileSync(entry, `${readFileSync(entry, "utf8")}\n// tampered\n`);
   rejectsBeforeMarker(() => assertPreparedPackages(root, expectation), "SDK dist tamper");
 });
