@@ -24,8 +24,12 @@ $installLog = Join-Path $expected.npmCacheRoot 'fresh-install.log'
 & cmd.exe /d /s /c $install 2>&1 | Tee-Object -FilePath $installLog
 $installExit = $LASTEXITCODE
 if ($installExit -ne 0) { exit $installExit }
-if (Select-String -LiteralPath $installLog -Pattern 'gyp ERR!|install: Failed|Unable to detect compiler type' -Quiet) {
-    throw 'Native build failure detected in fresh install log'
+$policyOutput = & node (Join-Path $PSScriptRoot 'install-log-policy.mjs') $installLog (Join-Path $expected.workspaceRoot 'pnpm-lock.yaml')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$policy = $policyOutput | ConvertFrom-Json
+if ($policy.requireFallbackProbe) {
+    & node (Join-Path $PSScriptRoot 'verify-optional-fallback.mjs') $expected.workspaceRoot ($policy.packages -join ',')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 $headers = Join-Path $expected.nodeGypRoot $expected.nodeHeadersVersion
 if (-not (Test-Path -LiteralPath $headers -PathType Container)) { throw "Pinned Node headers were not materialized: $headers" }

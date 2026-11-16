@@ -1,0 +1,66 @@
+name: WP01 isolated reproducibility gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [hum-282-wp01a-reproducible-pin]
+    paths:
+      - ".github/workflows/wp01-isolated-gate.yml"
+      - "experiments/wp00/**"
+      - "docs/wp01-sdk-shared-pin.md"
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact review commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+
+      - name: Build pinned runner image
+        run: docker build --pull=false --tag wp01-runner:${GITHUB_SHA} --file experiments/wp00/ci/Dockerfile .
+
+      - name: Build fresh source and verified artifacts
+        run: |
+          set -Eeuo pipefail
+          work="${RUNNER_TEMP}/wp01-build"
+          install -d -m 0777 "$work"
+          docker run --rm --user 999:999 \
+            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
+            --mount "type=bind,src=${work},dst=/work" \
+            wp01-runner:${GITHUB_SHA} \
+            /bin/bash /repo/experiments/wp00/ci/setup.sh /repo /work
+
+      - name: Run complete matrix without network
+        run: |
+          set -Eeuo pipefail
+          work="${RUNNER_TEMP}/wp01-build"
+          scratch="${RUNNER_TEMP}/wp01-scratch"
+          install -d -m 0777 "$scratch"
+          docker run --rm --user 999:999 --network none --read-only \
+            --cpus 2 --memory 3g --memory-swap 3g --pids-limit 128 \
+            --ulimit cpu=150:150 --ulimit nproc=128:128 --ulimit nofile=1024:1024 --ulimit fsize=1073741824:1073741824 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m \
+            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
+            --mount "type=bind,src=${work}/source,dst=/source,readonly" \
+            --mount "type=bind,src=${work}/tarballs,dst=/tarballs,readonly" \
+            --mount "type=bind,src=${work}/packages,dst=/packages,readonly" \
+            --mount "type=bind,src=${scratch},dst=/scratch" \
+            --entrypoint /usr/bin/env wp01-runner:${GITHUB_SHA} -i \
+            PATH=/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/bin:/bin \
+            HOME=/scratch/home TMPDIR=/scratch LANG=C.UTF-8 \
+            /usr/bin/timeout --signal=KILL 180s /bin/bash /repo/experiments/wp00/ci/run-full-gate.sh | tee "${scratch}/full-gate.log"
+
+      - name: Upload auditable gate log
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: wp01-isolated-gate-${{ github.sha }}
+          path: ${{ runner.temp }}/wp01-scratch/full-gate.log
+          if-no-files-found: error
+          retention-days: 14
