@@ -33,7 +33,7 @@ jobs:
           build_status=${PIPESTATUS[0]}
           set -e
           if [ "$build_status" -ne 0 ]; then
-            detail=$(tail -n 80 "$evidence/image-build.log" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
+            detail=$(tail -n 8 "$evidence/image-build.log" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
             printf '%s\n' "::error title=Pinned runner image build failed::${detail}"
             exit "$build_status"
           fi
