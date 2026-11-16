@@ -23,7 +23,12 @@ jobs:
           fetch-depth: 0
 
       - name: Build pinned runner image
-        run: docker build --pull=false --tag wp01-runner:${GITHUB_SHA} --file experiments/wp00/ci/Dockerfile .
+        run: |
+          set -Eeuo pipefail
+          evidence="${RUNNER_TEMP}/wp01-evidence"
+          install -d -m 0777 "$evidence"
+          docker build --progress=plain --pull=false --tag wp01-runner:${GITHUB_SHA} \
+            --file experiments/wp00/ci/Dockerfile . 2>&1 | tee "$evidence/image-build.log"
 
       - name: Build fresh source and verified artifacts
         run: |
@@ -54,13 +59,14 @@ jobs:
             --entrypoint /usr/bin/env wp01-runner:${GITHUB_SHA} -i \
             PATH=/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/bin:/bin \
             HOME=/scratch/home TMPDIR=/scratch LANG=C.UTF-8 \
-            /usr/bin/timeout --signal=KILL 180s /bin/bash /repo/experiments/wp00/ci/run-full-gate.sh | tee "${scratch}/full-gate.log"
+            /usr/bin/timeout --signal=KILL 180s /bin/bash /repo/experiments/wp00/ci/run-full-gate.sh \
+            | tee "${RUNNER_TEMP}/wp01-evidence/full-gate.log"
 
       - name: Upload auditable gate log
         if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: wp01-isolated-gate-${{ github.sha }}
-          path: ${{ runner.temp }}/wp01-scratch/full-gate.log
+          path: ${{ runner.temp }}/wp01-evidence/
           if-no-files-found: error
           retention-days: 14
