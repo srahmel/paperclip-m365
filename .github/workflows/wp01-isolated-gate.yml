@@ -42,12 +42,21 @@ jobs:
         run: |
           set -Eeuo pipefail
           work="${RUNNER_TEMP}/wp01-build"
+          evidence="${RUNNER_TEMP}/wp01-evidence"
           install -d -m 0777 "$work"
+          set +e
           docker run --rm --user 999:999 \
             --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
             --mount "type=bind,src=${work},dst=/work" \
             wp01-runner:${GITHUB_SHA} \
-            /bin/bash /repo/experiments/wp00/ci/setup.sh /repo /work
+            /bin/bash /repo/experiments/wp00/ci/setup.sh /repo /work 2>&1 | tee "$evidence/setup.log"
+          setup_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$setup_status" -ne 0 ]; then
+            detail=$(tail -n 8 "$evidence/setup.log" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
+            printf '%s\n' "::error title=Fresh source setup failed::${detail}"
+            exit "$setup_status"
+          fi
 
       - name: Run complete matrix without network
         run: |
