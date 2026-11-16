@@ -27,8 +27,16 @@ jobs:
           set -Eeuo pipefail
           evidence="${RUNNER_TEMP}/wp01-evidence"
           install -d -m 0777 "$evidence"
+          set +e
           docker build --progress=plain --pull=false --tag wp01-runner:${GITHUB_SHA} \
             --file experiments/wp00/ci/Dockerfile . 2>&1 | tee "$evidence/image-build.log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            detail=$(tail -n 80 "$evidence/image-build.log" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
+            printf '%s\n' "::error title=Pinned runner image build failed::${detail}"
+            exit "$build_status"
+          fi
 
       - name: Build fresh source and verified artifacts
         run: |
