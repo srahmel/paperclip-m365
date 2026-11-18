@@ -11,17 +11,26 @@ const fromPaperclip = (relativePath) => pathToFileURL(resolve(paperclipSource, r
 const fromPackage = (relativePath) => pathToFileURL(resolve(packageRoot, relativePath)).href;
 
 const dbModule = await import(fromPaperclip("packages/db/src/index.ts"));
-const embeddedModule = await import(
-  fromPaperclip("server/src/__tests__/helpers/embedded-postgres.ts")
-);
 const loaderModule = await import(fromPaperclip("server/src/services/plugin-loader.ts"));
 const lifecycleModule = await import(fromPaperclip("server/src/services/plugin-lifecycle.ts"));
 const registryModule = await import(fromPaperclip("server/src/services/plugin-registry.ts"));
 const databaseModule = await import(fromPaperclip("server/src/services/plugin-database.ts"));
 
-const temporary = await embeddedModule.startEmbeddedPostgresTestDatabase(
-  "paperclip-m365-wp01-",
-);
+const externalConnectionString = process.env.PAPERCLIP_DATABASE_URL;
+if (externalConnectionString) {
+  await dbModule.applyPendingMigrations(externalConnectionString);
+}
+const temporary = externalConnectionString
+  ? {
+      connectionString: externalConnectionString,
+      cleanup: () => dbModule.closeRegisteredClients(externalConnectionString),
+    }
+  : await (async () => {
+      const embeddedModule = await import(
+        fromPaperclip("server/src/__tests__/helpers/embedded-postgres.ts")
+      );
+      return embeddedModule.startEmbeddedPostgresTestDatabase("paperclip-m365-wp01-");
+    })();
 
 try {
   const db = dbModule.createDb(temporary.connectionString);

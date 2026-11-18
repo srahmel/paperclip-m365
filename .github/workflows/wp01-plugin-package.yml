@@ -28,8 +28,10 @@ jobs:
           node-version: 24.22.1
           registry-url: https://registry.npmjs.org
 
-      - name: Pin npm and Corepack
-        run: npm install --global --ignore-scripts npm@11.19.1 corepack@0.34.5
+      - name: Pin npm and Corepack without global mutation
+        run: |
+          npm install --prefix "${{ runner.temp }}/wp01-tooling" --ignore-scripts npm@11.19.1 corepack@0.34.5
+          node -e "require('node:fs').appendFileSync(process.env.GITHUB_PATH, require('node:path').join(process.env.RUNNER_TEMP, 'wp01-tooling', 'node_modules', '.bin') + require('node:os').EOL)"
 
       - name: Verify runner contract
         run: npm run check:runner

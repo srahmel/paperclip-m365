@@ -73,10 +73,13 @@ assert_tap_counts 18 "$scratch/install-policy.tap"
 
 export PAPERCLIP_PACKAGE_ROOT=$plugin_install/node_modules/paperclip-plugin-m365
 export PAPERCLIP_REGISTRY_ROOT=/packages
+export PAPERCLIP_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/paperclip_m365_wp01
+createdb -h 127.0.0.1 -U postgres paperclip_m365_wp01
 tsx_loader=$(dirname "$source/$runner")/loader.mjs
 node --import "$tsx_loader" --import "$repo/scripts/register-registry-sdk-pin.mjs" \
   "$repo/tests/host-lifecycle.integration.mjs" | tee "$scratch/plugin-lifecycle.log"
 grep -q '"check":"isolated-host-lifecycle"' "$scratch/plugin-lifecycle.log" || fail "plugin lifecycle evidence is missing"
+dropdb -h 127.0.0.1 -U postgres paperclip_m365_wp01
 
 pg_ctl -D "$pgdata" -m fast -w stop >/dev/null
 trap - EXIT HUP INT TERM
