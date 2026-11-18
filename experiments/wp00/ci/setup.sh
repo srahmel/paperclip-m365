@@ -10,13 +10,20 @@ store=$work/pnpm-store
 cache=$work/npm-cache
 tarballs=$work/tarballs
 packages=$work/packages/node_modules
+plugin=$work/plugin
+plugin_cache=$work/plugin-npm-cache
+plugin_install=$work/plugin-installed
 readonly_empty=$work/readonly-empty
 log=$work/fresh-install.log
+plugin_log=$work/plugin-verify.log
 
 [ ! -e "$source" ] || fail "source path is not fresh: $source"
 [ ! -e "$store" ] || fail "pnpm store is not fresh: $store"
 [ ! -e "$cache" ] || fail "npm cache is not fresh: $cache"
-mkdir -p "$work" "$store" "$cache" "$tarballs" "$packages" "$readonly_empty"
+[ ! -e "$plugin" ] || fail "plugin build path is not fresh: $plugin"
+[ ! -e "$plugin_cache" ] || fail "plugin npm cache is not fresh: $plugin_cache"
+[ ! -e "$plugin_install" ] || fail "plugin install path is not fresh: $plugin_install"
+mkdir -p "$work" "$store" "$cache" "$tarballs" "$packages" "$plugin" "$plugin_cache" "$plugin_install" "$readonly_empty"
 
 git init -q "$source"
 git -C "$source" remote add origin https://github.com/paperclipai/paperclip.git
@@ -36,6 +43,21 @@ npm pack @paperclipai/shared@2026.1106.0 --pack-destination "$tarballs" --ignore
 npm pack zod@4.6.7 --pack-destination "$tarballs" --ignore-scripts
 npm pack three@0.185.1 --pack-destination "$tarballs" --ignore-scripts
 node "$repo/experiments/wp00/prepare-artifacts.mjs" "$tarballs" "$packages"
+
+(cd "$repo" && tar --exclude=.git --exclude=node_modules --exclude=dist --exclude='*.tgz' -cf - .) \
+  | tar -xf - -C "$plugin"
+(
+  cd "$plugin"
+  npm ci --ignore-scripts --cache "$plugin_cache"
+  npm run verify 2>&1 | tee "$plugin_log"
+)
+plugin_artifact=$plugin/paperclip-plugin-m365-0.1.0.tgz
+[ -f "$plugin_artifact" ] || fail "verified plugin artifact is missing"
+npm install --prefix "$plugin_install" --ignore-scripts --cache "$plugin_cache" "$plugin_artifact"
+test -f "$plugin_install/node_modules/paperclip-plugin-m365/dist/manifest.js"
+test -f "$plugin_install/node_modules/paperclip-plugin-m365/dist/worker.js"
+test -f "$plugin_install/node_modules/paperclip-plugin-m365/dist/ui/index.js"
+sha256sum "$plugin_artifact"
 chmod 0555 "$readonly_empty"
 
-printf '%s\n' '{"probe":"wp01-ci-setup","status":"pass","sourceInstall":"fresh","pnpmStore":"fresh","npmCache":"fresh"}'
+printf '%s\n' '{"probe":"wp01-ci-setup","status":"pass","sourceInstall":"fresh","pnpmStore":"fresh","npmCache":"fresh","pluginInstall":"packed-artifact"}'

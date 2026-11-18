@@ -1,10 +1,39 @@
 # Paperclip M365
 
+Package name: `paperclip-plugin-m365`
+
+Plugin ID: `srahmel.m365`
+
+The current WP01 package is an installable TypeScript scaffold. It contains a
+Paperclip worker, a React settings entrypoint, and an additive plugin-owned
+schema migration. It does not contain Microsoft authentication, Graph calls,
+mail, calendar, OneDrive, production configuration, or customer data.
+
+## Build and verification
+
+The supported runtime is Node.js `24.22.1` with npm `11.19.1`. Dependencies are
+restored from `package-lock.json` with lifecycle scripts disabled.
+
+```powershell
+npm ci --ignore-scripts
+npm run verify
+```
+
+`npm run verify` checks the WP01A SDK/Shared/SRI pin, dependency licenses,
+project files for common secret patterns, TypeScript types, tests, all build
+entrypoints, and the packed artifact. The pack check prints the `.tgz` SHA-256
+and its complete file list.
+
+No credentials are required. Future configuration examples must use placeholders
+only; secrets belong in the Paperclip Secret Store.
+
 Geplantes natives Paperclip-Plugin für Microsoft 365: E-Mails und Kalender lesen und bearbeiten sowie Dateien und Ordner in OneDrive lesen, anlegen, ändern und löschen.
 
 Das Plugin soll eigene Microsoft-365-Verbindungen je Agent und gemeinsam genutzte Verbindungen mit getrennten Agentenrechten unterstützen. Funktionsreferenz ist [Softeria/ms-365-mcp-server](https://github.com/Softeria/ms-365-mcp-server); die Integration erfolgt direkt über Microsoft Graph.
 
-**Stand vom 15. November 2026: Recherche und Planung.** Dieses Repository enthält noch keine ausführbare Plugin-Implementierung.
+**Stand vom 19. November 2026: WP01-Grundgerüst.** Das installierbare Plugin-
+Scaffold ist vorhanden; Microsoft-Authentifizierung und fachliche Funktionen
+beginnen erst in den nachfolgenden, separat freizugebenden Arbeitspaketen.
 
 | Bereich | Geplanter Umfang der ersten Version |
 | --- | --- |
@@ -22,5 +51,6 @@ Das Plugin soll eigene Microsoft-365-Verbindungen je Agent und gemeinsam genutzt
 - [Recherche und technische Nachweise](docs/research.md)
 - [ADR 0001: geprüfte Paperclip-Laufzeitverträge](docs/decisions/0001-paperclip-runtime-contracts.md)
 - [Reproduzierbarer WP00-Vertragsversuch](experiments/wp00/README.md)
+- [WP01-Scaffold, Build- und Installationsnachweis](docs/wp01-scaffold.md)
 
 Geplant sind TypeScript, das offizielle Paperclip Plugin SDK und Microsoft Graph v1.0. Die Anmeldung verwendet Microsoft Entra ID und MSAL. Zugangsdaten und produktive Konfiguration gehören in den Secret Store beziehungsweise die jeweilige Installation.

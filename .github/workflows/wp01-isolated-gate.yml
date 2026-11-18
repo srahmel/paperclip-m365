@@ -3,9 +3,16 @@ name: WP01 isolated reproducibility gate
 on:
   workflow_dispatch:
   push:
-    branches: [hum-282-wp01a-reproducible-pin]
+    branches: [hum-282-wp01a-reproducible-pin, hum-323-wp01-scaffold]
     paths:
       - ".github/workflows/wp01-isolated-gate.yml"
+      - ".github/workflows/wp01-plugin-package.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/**"
+      - "src/**"
+      - "tests/**"
+      - "migrations/**"
       - "experiments/wp00/**"
       - "docs/wp01-sdk-shared-pin.md"
 
@@ -78,6 +85,7 @@ jobs:
             --mount "type=bind,src=${work}/source,dst=/source,readonly" \
             --mount "type=bind,src=${work}/tarballs,dst=/tarballs,readonly" \
             --mount "type=bind,src=${work}/packages,dst=/packages,readonly" \
+            --mount "type=bind,src=${work}/plugin-installed,dst=/plugin-installed,readonly" \
             --mount "type=bind,src=${work}/readonly-empty,dst=/var/lib/postgresql/data,readonly" \
             --mount "type=bind,src=${scratch},dst=/scratch" \
             --entrypoint /usr/bin/env wp01-runner:${GITHUB_SHA} -i \

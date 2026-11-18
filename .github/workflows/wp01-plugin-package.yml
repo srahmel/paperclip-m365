@@ -1,0 +1,49 @@
+name: WP01 plugin package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [hum-323-wp01-scaffold]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Use pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.22.1
+          registry-url: https://registry.npmjs.org
+
+      - name: Pin npm and Corepack
+        run: npm install --global --ignore-scripts npm@11.19.1 corepack@0.34.5
+
+      - name: Verify runner contract
+        run: npm run check:runner
+
+      - name: Restore exact lock without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Verify policy, types, tests, build, and package
+        run: npm run verify
+
+      - name: Upload verified package
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: paperclip-plugin-m365-${{ matrix.os }}-${{ github.sha }}
+          path: paperclip-plugin-m365-0.1.0.tgz
+          if-no-files-found: error
+          retention-days: 14

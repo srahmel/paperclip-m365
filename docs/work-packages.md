@@ -9,7 +9,7 @@ Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen sc
 | Paket | Ergebnis | Abhängigkeit | Aufwand |
 | --- | --- | --- | --- |
 | WP00 | Geprüfter Paperclip-Vertrag und Architekturentscheidungen | Keine | ca. 2 PT, korrigierter Stand wartet auf Doppelreview |
-| WP01 | Plugin-Grundgerüst, Build und CI | WP00 sowie Vera-/Hagen-Empfehlung auf demselben Commit | 1 bis 2 PT verbleibend; Pin-Gate lokal grün |
+| WP01 | Plugin-Grundgerüst, Build und CI | WP00 sowie Vera-/Hagen-Empfehlung auf demselben Commit | Implementiert; CI- und Doppelreview-Abschluss verbleiben |
 | WP02 | Microsoft-Anmeldung und verschlüsselter Token-Cache | WP01 | 4 bis 6 PT |
 | WP03 | Agentenrechte und konkrete Änderungsfreigaben | WP01, WP00 | 4 bis 6 PT |
 | WP04 | Graph-Transport, Fehlerbehandlung, Pagination und Betriebsmetriken | WP01 | 3 bis 4 PT |

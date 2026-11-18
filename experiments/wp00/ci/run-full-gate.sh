@@ -14,9 +14,10 @@ repo=/repo
 source=/source
 tarballs=/tarballs
 packages=/packages/node_modules
+plugin_install=/plugin-installed
 scratch=/scratch
 
-for mount in "$repo" "$source" "$tarballs" "$packages"; do
+for mount in "$repo" "$source" "$tarballs" "$packages" "$plugin_install"; do
   options=$(findmnt -T "$mount" -n -o OPTIONS) || fail "cannot inspect mount: $mount"
   case ",$options," in *,ro,*) ;; *) fail "mount is not read-only: $mount ($options)" ;; esac
   if touch "$mount/.wp01-write-probe" 2>/dev/null; then fail "write unexpectedly succeeded: $mount"; fi
@@ -70,6 +71,13 @@ node "$repo/experiments/wp00/gateway-probe.mjs"
 node --test --test-reporter=tap "$repo/experiments/wp00/install-log-policy.test.mjs" | tee "$scratch/install-policy.tap"
 assert_tap_counts 18 "$scratch/install-policy.tap"
 
+export PAPERCLIP_PACKAGE_ROOT=$plugin_install/node_modules/paperclip-plugin-m365
+export PAPERCLIP_REGISTRY_ROOT=/packages
+tsx_loader=$(dirname "$source/$runner")/loader.mjs
+node --import "$tsx_loader" --import "$repo/scripts/register-registry-sdk-pin.mjs" \
+  "$repo/tests/host-lifecycle.integration.mjs" | tee "$scratch/plugin-lifecycle.log"
+grep -q '"check":"isolated-host-lifecycle"' "$scratch/plugin-lifecycle.log" || fail "plugin lifecycle evidence is missing"
+
 pg_ctl -D "$pgdata" -m fast -w stop >/dev/null
 trap - EXIT HUP INT TERM
-printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","sdkAssertions":"28/28","gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'
+printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","sdkAssertions":"28/28","pluginLifecycle":"install-enable-smoke-disable-restore","gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'
