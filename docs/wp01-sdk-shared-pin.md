@@ -1,53 +1,53 @@
-# WP01A: reproduzierbarer Paperclip-SDK-/Shared-Pin
+# WP01A: Reproducible Paperclip SDK/Shared pin
 
-Stand: 16. November 2026.
+As of: November 16, 2026.
 
-## HUM-285-Korrekturstand
+## HUM-285 remediation status
 
-Der Reviewpfad ist jetzt als fail-closed Gate implementiert. `gate-lib.mjs` prüft vor Zielausführung den exakt leeren Output von `git status --porcelain=v1 --untracked-files=all`, Commit, Tag, Tree, Origin, Sparse-Checkout, zusätzliche Worktrees und Submodule. Die Registryerwartung bindet SDK, Shared, zod und three jeweils an Version, URL, SRI, vollständiges Inhaltsmanifest und alle vier direkten Abhängigkeitskanten. Tarball-SRI wird vor Extraktion geprüft; erst danach wird in den verwerfbaren Scratch extrahiert, der vollständige Baum erneut geprüft, read-only gesetzt und genau dessen `dist/index.js` importiert.
+The review path is now implemented as a fail-closed gate. Before executing target code, `gate-lib.mjs` checks that the output of `git status --porcelain=v1 --untracked-files=all` is exactly empty, along with the commit, tag, tree, origin, sparse checkout, additional worktrees and submodules. The registry expectations bind SDK, Shared, zod and three to their respective version, URL, SRI, complete content manifest and all four direct dependency edges. Tarball SRI is checked before extraction; only then is the archive extracted into disposable scratch space, the complete tree checked again and made read-only, and that tree's exact `dist/index.js` imported.
 
-Der maßgebliche Review-/CI-Pfad ist `.github/workflows/wp01-isolated-gate.yml`. Seine Ausführungsbasis ist `postgres:17.7-bookworm@sha256:e9243ab06e47223dedeb3c129fa9ece8d37f506bdc6ee943afb9335f98bb4854`; Node kommt aus `node:24.22.1-bookworm@sha256:0925478b811e8890f5508ad2a75135933310effd45492696ecf7c111c8339d02`. Debian-Pakete werden ausschließlich aus Snapshot `20260203T000000Z` bezogen. npm, Corepack, pnpm und node-gyp werden über feste Registry-URLs plus SHA-256 installiert. `verify-linux-contract.mjs` prüft vor Zielcode Node 24.22.1, npm 11.19.1, Corepack 0.34.5, pnpm 9.15.4, Git 2.39.5, Python 3.11.2, PostgreSQL 17.7, GCC/G++ 12.2.0, Make 4.3 und node-gyp 12.1.0.
+The authoritative review/CI path is `.github/workflows/wp01-isolated-gate.yml`. Its execution base is `postgres:17.7-bookworm@sha256:e9243ab06e47223dedeb3c129fa9ece8d37f506bdc6ee943afb9335f98bb4854`; Node comes from `node:24.22.1-bookworm@sha256:0925478b811e8890f5508ad2a75135933310effd45492696ecf7c111c8339d02`. Debian packages are obtained exclusively from snapshot `20260203T000000Z`. npm, Corepack, pnpm and node-gyp are installed using fixed registry URLs plus SHA-256. Before target code runs, `verify-linux-contract.mjs` checks Node 24.22.1, npm 11.19.1, Corepack 0.34.5, pnpm 9.15.4, Git 2.39.5, Python 3.11.2, PostgreSQL 17.7, GCC/G++ 12.2.0, Make 4.3 and node-gyp 12.1.0.
 
-Der Aufbau läuft mit Netzwerk in einem frischen Checkout, leerem pnpm-Store und leerem npm-Cache. Erst danach startet ein neuer Container mit `--network none`, leerem `env -i`, read-only Root/Repository/Quelle/Tarballs/Paketbaum/PostgreSQL-Standardvolume, UID/GID 999, `--cap-drop ALL`, `no-new-privileges` und genau einem beschreibbaren `/scratch`-Bind. `/tmp` und `/var/lib/postgresql/data` werden durch Schreibproben als nicht beschreibbar nachgewiesen; `/dev/shm` ist read-only. Docker erzwingt 2 CPUs, 3 GiB Speicher ohne Swap, 128 PIDs, 4096 offene Dateien und 1 GiB Dateigröße; `ulimit` begrenzt zusätzlich 150 CPU-Sekunden und der äußere `timeout` 180 Sekunden Wallclock. PostgreSQL lauscht nur auf Loopback im netzlosen Container. Fehlt eine Grenze oder Version, startet beziehungsweise besteht kein Zielcode.
+Setup runs with network access in a fresh checkout, with an empty pnpm store and npm cache. Only afterward does a new container start with `--network none`, an empty `env -i`, read-only root/repository/source/tarballs/package tree/default PostgreSQL volume, UID/GID 999, `--cap-drop ALL`, `no-new-privileges` and exactly one writable `/scratch` bind mount. Write probes demonstrate that `/tmp` and `/var/lib/postgresql/data` are not writable; `/dev/shm` is read-only. Docker enforces 2 CPUs, 3 GiB of memory without swap, 128 PIDs, 4096 open files and a 1 GiB file size limit; `ulimit` additionally limits CPU time to 150 seconds, and the outer `timeout` limits wall-clock time to 180 seconds. PostgreSQL listens only on loopback inside the container without network access. If any limit or version is missing, no target code starts or passes.
 
-`run-isolated-gate.ps1`/bubblewrap bleibt ein lokaler zusätzlicher Negativ-/Artefaktpfad. Der frühere direkte Hostrunner ist deaktiviert; er darf den Zielcode nicht ausführen.
+`run-isolated-gate.ps1`/bubblewrap remains an additional local negative-test/artifact path. The former direct host runner is disabled; it must not execute target code.
 
-Die isolierte Negativmatrix besteht aus einer expliziten Liste von 31 eindeutigen Fällen: untracked/staged/unstaged, uninitialisiertes Submodul, Sparse-/Worktreeabweichung, falscher Commit/Tag, jedes Version-/URL-/Integrity-Feld aller vier Pakete, alle vier Kanten sowie für jedes der vier Pakete ein real veränderter Tarball und ein real veränderter vorbereiteter Inhaltsbaum. CI leitet Sollzähler und Namen aus dieser Liste ab und vergleicht beides exakt mit TAP. Jeder Fall prüft zusätzlich, dass Extraktion beziehungsweise Zielimport nicht ausgeführt wurde. Der positive isolierte Artefaktpfad bestand gegen einen vollständigen frischen Checkout.
+The isolated negative matrix consists of an explicit list of 31 unique cases: untracked/staged/unstaged changes, an uninitialized submodule, sparse-checkout/worktree deviations, an incorrect commit/tag, every version/URL/integrity field of all four packages, all four edges, and an actually modified tarball and prepared content tree for each of the four packages. CI derives expected counts and names from this list and compares both exactly with TAP. Each case additionally checks that extraction or target import was not executed. The positive isolated artifact path passed against a complete fresh checkout.
 
-Der maschinenlesbare Windows-Vertrag steht in `runner-contract.json`; `verify-runner-contract.ps1` prüft Node 24.22.1, npm 11.19.1, Corepack 0.34.5, pnpm 9.15.4, Git 2.47.1.windows.2, Python 3.14.0, PostgreSQL 17, VS 2022/MSVC 14.44.35207, Windows SDK 10.0.26100.0, mindestens 6 GiB plus 2 GiB Reserve und den expliziten VS-Developer-Command-Pfad. Der Negativtest schleust ausschließlich für `corepack --version` die abweichende Version 0.34.4 ein und verlangt einen fail-closed Exit. `fresh-source-install.ps1` verlangt nicht vorhandene feste Pfade unter `F:\w`, initialisiert VS x64, trennt pnpm-Store, npm-Cache und Node-Header 24.22.1 und bricht bei Abweichungen ab.
+The machine-readable Windows contract is in `runner-contract.json`; `verify-runner-contract.ps1` checks Node 24.22.1, npm 11.19.1, Corepack 0.34.5, pnpm 9.15.4, Git 2.47.1.windows.2, Python 3.14.0, PostgreSQL 17, VS 2022/MSVC 14.44.35207, Windows SDK 10.0.26100.0, at least 6 GiB plus 2 GiB of reserve space, and the explicit VS Developer Command path. The negative test injects the differing version 0.34.4 exclusively for `corepack --version` and requires a fail-closed exit. `fresh-source-install.ps1` requires fixed paths under `F:\w` that do not yet exist, initializes VS x64, separates the pnpm store, npm cache and Node 24.22.1 headers, and aborts on deviations.
 
-Windows produziert reproduzierbar ausschließlich zwei optionale Native-Fehler: `cpu-features@0.0.10` erkennt den Compiler nicht; der in `ssh2@1.17.0` ausdrücklich optionale Crypto-Build scheitert in MSBuild FileTracker. `install-log-policy.mjs` akzeptiert Native-Diagnosen nur innerhalb dieser gestarteten, versionsgebundenen Lifecycleblöcke und nur wenn Lock-Integrity sowie `ssh2 -> cpu-features@0.0.10`/`optional: true` stimmen. `verify-optional-fallback.mjs` weist anschließend nach, dass das ssh2-Native-Binding nicht geladen wurde, der erwartete cpu-features-Requireversuch nicht erfolgreich geladen wurde und kein anderer Aufrufer beteiligt war. `npm error`, `npm ERR!`, `ERR_PNPM`, unscoped `ELIFECYCLE` und `Command failed with exit code …` brechen auch innerhalb eines optionalen Blocks sofort ab. Jede andere `gyp`, MSBuild-, npm-, pnpm- oder Installabweichung bricht ebenfalls ab.
+Windows reproducibly produces only two optional native errors: `cpu-features@0.0.10` does not recognize the compiler; the explicitly optional crypto build in `ssh2@1.17.0` fails in MSBuild FileTracker. `install-log-policy.mjs` accepts native diagnostics only within these started, version-bound lifecycle blocks and only when lock integrity and `ssh2 -> cpu-features@0.0.10`/`optional: true` match. `verify-optional-fallback.mjs` subsequently demonstrates that the ssh2 native binding was not loaded, the expected cpu-features require attempt did not successfully load it, and no other caller was involved. `npm error`, `npm ERR!`, `ERR_PNPM`, unscoped `ELIFECYCLE` and `Command failed with exit code …` abort immediately, even within an optional block. Any other `gyp`, MSBuild, npm, pnpm or installation deviation also aborts.
 
-### Aktuelle Nachweise
+### Current evidence
 
-Der repositorygebundene Linux-Lauf `43813001303` auf Commit `471b747c4b4fe2862de840ab2cd61382dfab1b0e` bestand als erster vollständiger Lauf. Er enthält im Audit-Artefakt den frischen Install, die Toolversionen, 25/25 Negativfälle, den SRI-/Manifest-geprüften read-only SDK-Import, PostgreSQL 20/20, Typecheck, SDK 28/28, Offline-Gateway 0/0 und die Install-Policytests. Der abschließende Lauf auf dem Übergabecommit ist Bestandteil der Reviewübergabe.
+Repository-bound Linux run `43813001303` on commit `471b747c4b4fe2862de840ab2cd61382dfab1b0e` was the first complete run to pass. Its audit artifact contains the fresh installation, tool versions, 25/25 negative cases, the SRI/manifest-verified read-only SDK import, PostgreSQL 20/20, typecheck, SDK 28/28, offline gateway 0/0 and installation policy tests. The final run on the handoff commit is part of the review handoff.
 
-Der integrierte Windows-Fresh-Install bestand danach mit 1104,62 GiB frei/8 GiB gefordert, leerem Store/Cache/Headerpfad, 1337 frisch wiederhergestellten Paketen, sichtbarem Policy-PASS, Fallback-PASS, vorhandenem Node-24.22.1-Headerbaum und leerem Porcelain-Status. SHA-256 des Installlogs: `924b2cda372dabe472002f0081020f1801b781492732071f929a344f888d9087`.
+The integrated Windows fresh install subsequently passed with 1104.62 GiB free/8 GiB required, an empty store/cache/header path, 1337 freshly restored packages, visible policy PASS, fallback PASS, an existing Node 24.22.1 header tree and an empty porcelain status. Installation log SHA-256: `924b2cda372dabe472002f0081020f1801b781492732071f929a344f888d9087`.
 
-Trust Boundary: GitHub-hosted Ubuntu-Runner und Docker-Daemon sind vertrauenswürdige Orchestrierung. Netzwerk ist nur beim Image-/Quell-/Artefaktaufbau erlaubt; SRI, Inhaltsmanifest und vollständige Zieltests laufen danach offline. Die Grenzen beweisen keine Abwehr gegen einen kompromittierten GitHub-Host oder Docker-Daemon. Es gab keinen lokalen Docker-Desktop-Start, keine Systeminstallation, keine Paperclip-/Microsoft-Integration und keinen Zugriff auf echte Konten.
+Trust boundary: the GitHub-hosted Ubuntu runner and Docker daemon are trusted orchestration. Network access is permitted only while preparing images/sources/artifacts; SRI, content manifest and complete target tests subsequently run offline. These boundaries do not demonstrate protection against a compromised GitHub host or Docker daemon. There was no local Docker Desktop startup, system installation, Paperclip/Microsoft integration or access to real accounts.
 
-## Ergebnis des ursprünglichen Pins
+## Original pin result
 
-Paperclip M365 bindet den ersten WP01-Stand an die veröffentlichten Pakete `@paperclipai/plugin-sdk@2026.1106.0` und `@paperclipai/shared@2026.1106.0` sowie an das öffentliche Paperclip-Tag `v2026.1106.0`. Das Tag zeigt auf den sauberen Commit `d69631b01b9c658f80bf8bed389863dce82643e1`. Die vollständige synthetische WP00-Probe ist gegen die aus der Registry installierte SDK-Ausgabe und die Hostvalidatoren dieses Commits grün.
+Paperclip M365 binds the initial WP01 state to the published packages `@paperclipai/plugin-sdk@2026.1106.0` and `@paperclipai/shared@2026.1106.0` and to the public Paperclip tag `v2026.1106.0`. The tag points to clean commit `d69631b01b9c658f80bf8bed389863dce82643e1`. The complete synthetic WP00 probe passes against the SDK distribution installed from the registry and the host validators from this commit.
 
-Der frühere lokale Dirty-Checkout `c645b7795b5665eaafb3a30fe23e2deb0811dc6e` bleibt historische WP00-Evidenz, ist aber kein WP01-Pin mehr. Es wurde kein Featurecode, Manifest, Worker, UI-Scaffold, Plugininstallationsversuch oder Paperclip-Core-Änderung begonnen.
+The former local dirty checkout `c645b7795b5665eaafb3a30fe23e2deb0811dc6e` remains historical WP00 evidence but is no longer a WP01 pin. No feature code, manifest, worker, UI scaffold, plugin installation attempt or Paperclip core change had been started.
 
-## Quellen-, Pin- und Integritätstabelle
+## Source, pin and integrity table
 
-| Artefakt | Quelle und exakter Pin | Integritätsnachweis | Verwendung |
+| Artifact | Source and exact pin | Integrity evidence | Usage |
 | --- | --- | --- | --- |
-| Paperclip-Quelle | `https://github.com/paperclipai/paperclip.git`, Tag `v2026.1106.0`, Commit `d69631b01b9c658f80bf8bed389863dce82643e1`, Tree `1955a72d50a89ef05295791948b78c93e36615a6` | leerer tracked Diff `e69de29bb2d1d6434b8b29ae775ad8c2e48c5391`; relevante Dateihashes in `expected-host-fingerprint.json` | Hostvalidatoren, SDK-Quelltests und reproduzierbarer Buildpfad |
-| Quell-Lock | `pnpm-lock.yaml` aus demselben Commit; `pnpm@9.15.4` | SHA-256 `242f0f08eb06fb2add28773f85a91d5e00a7ff8d71288d2d12a1163bee62d4e5` | vollständige Quellwiederherstellung mit `--frozen-lockfile` |
-| Plugin SDK | npm `@paperclipai/plugin-sdk@2026.1106.0` | `sha512-dmRBcyEIsqKAxBfrqwVGNxnARCwsGCt2bhrch49E0jhGzo0wwn501W9B3YADggSTSbm81FxMu8/G9z/jDrNeKA==` | tatsächlich von der 20er-Vertragsprobe geladenes `dist`-Artefakt |
-| Shared | npm `@paperclipai/shared@2026.1106.0`, vom SDK exakt verlangt | `sha512-fleBeHYbmnwdvEuzyQ4ABUFbHzqft47ni/ZktF1jWQsFkyfHmHBz5xFm3nfD3WZQ9UGnVZmXfEhfk+nizpeGEQ==` | transitive SDK-Laufzeitabhängigkeit |
-| Registry-Transitive | `three@0.185.1`, `zod@4.6.7` | vollständige `resolved`-/`integrity`-Einträge in `experiments/wp00/registry-pin/package-lock.json` | deterministischer `npm ci`-Stand |
-| Test-Runner | `tsx@4.23.15` aus dem Quell-Lock | SHA-256 der Paketmetadaten und CLI im Fingerprint | TypeScript-Ausführung der WP00-Probe |
+| Paperclip source | `https://github.com/paperclipai/paperclip.git`, tag `v2026.1106.0`, commit `d69631b01b9c658f80bf8bed389863dce82643e1`, tree `1955a72d50a89ef05295791948b78c93e36615a6` | Empty tracked diff `e69de29bb2d1d6434b8b29ae775ad8c2e48c5391`; relevant file hashes in `expected-host-fingerprint.json` | Host validators, SDK source tests and reproducible build path |
+| Source lock | `pnpm-lock.yaml` from the same commit; `pnpm@9.15.4` | SHA-256 `242f0f08eb06fb2add28773f85a91d5e00a7ff8d71288d2d12a1163bee62d4e5` | Complete source restoration with `--frozen-lockfile` |
+| Plugin SDK | npm `@paperclipai/plugin-sdk@2026.1106.0` | `sha512-dmRBcyEIsqKAxBfrqwVGNxnARCwsGCt2bhrch49E0jhGzo0wwn501W9B3YADggSTSbm81FxMu8/G9z/jDrNeKA==` | `dist` artifact actually loaded by the 20-assertion contract probe |
+| Shared | npm `@paperclipai/shared@2026.1106.0`, required exactly by the SDK | `sha512-fleBeHYbmnwdvEuzyQ4ABUFbHzqft47ni/ZktF1jWQsFkyfHmHBz5xFm3nfD3WZQ9UGnVZmXfEhfk+nizpeGEQ==` | Transitive SDK runtime dependency |
+| Registry transitives | `three@0.185.1`, `zod@4.6.7` | Complete `resolved`/`integrity` entries in `experiments/wp00/registry-pin/package-lock.json` | Deterministic `npm ci` state |
+| Test runner | `tsx@4.23.15` from the source lock | SHA-256 of package metadata and CLI in the fingerprint | TypeScript execution of the WP00 probe |
 
-Der öffentliche Quellbaum führt intern weiterhin SDK `1.0.0` und Shared `0.3.1`; die Release-Pipeline veröffentlicht beide als `2026.1106.0`. Deshalb prüft der Fingerprint Quell- und veröffentlichte Version getrennt. Registry-Metadaten enthalten für diese Version kein `gitHead`; die Kompatibilität wird nicht daraus abgeleitet, sondern durch die Probe mit dem installierten Registry-SDK plus den exakt gepinnten Hostvalidatoren nachgewiesen.
+The public source tree still uses SDK `1.0.0` and Shared `0.3.1` internally; the release pipeline publishes both as `2026.1106.0`. The fingerprint therefore checks source and published versions separately. Registry metadata contains no `gitHead` for this version; compatibility is not inferred from it but demonstrated by the probe using the installed registry SDK plus the exactly pinned host validators.
 
-## Frische Wiederherstellung
+## Fresh restoration
 
-Die positive Probe verwendete zwei zuvor nicht vorhandene Verzeichnisse und keinen bestehenden `node_modules`-Stand:
+The positive probe used two previously nonexistent directories and no existing `node_modules` state:
 
 ```powershell
 git clone --filter=blob:none --no-checkout https://github.com/paperclipai/paperclip.git F:\tmp\hum282-pin\src
@@ -61,36 +61,36 @@ Copy-Item experiments\wp00\registry-pin\package*.json F:\tmp\hum282-registry
 npm ci --ignore-scripts --prefix F:\tmp\hum282-registry
 ```
 
-Ein Voll-Checkout beziehungsweise pnpm-Store unter dem langen Runner-Scratch-Prefix scheiterte auf Windows reproduzierbar mit `Filename too long` beziehungsweise `ENAMETOOLONG`. Der kurze Pfad und der Sparse-Checkout sind deshalb eine dokumentierte Windows-Buildvoraussetzung, keine Änderung an Commit oder Lockfile. Auf Dateisystemen ohne diese Grenze kann derselbe Commit vollständig ausgecheckt werden.
+A full checkout or pnpm store under the long runner scratch prefix reproducibly failed on Windows with `Filename too long` or `ENAMETOOLONG`. The short path and sparse checkout are therefore a documented Windows build prerequisite, not a change to the commit or lockfile. On file systems without this limitation, the same commit can be checked out in full.
 
-## Ausgeführte Prüfungen des ursprünglichen Pins
+## Checks performed for the original pin
 
-| Prüfung | Ergebnis |
+| Check | Result |
 | --- | --- |
-| Fingerprint für Repository, Tag, Commit, Tree, sauberen Diff, Quell-Lock, Registry-Lock, SDK/Shared-Integrity, Runner und relevante Dateien | PASS |
-| `npm ci --ignore-scripts` aus dem Registry-Lock in leerem Verzeichnis | PASS, 4 Pakete installiert, Audit 0 Findings |
-| PostgreSQL-17-Vertragsprobe mit installiertem Registry-SDK | PASS, 20/20 Assertions |
-| Offline-Gateway-Negativprobe | PASS, `networkCalls: 0`, `dispatches: 0`, fünf Negativfälle fail closed |
-| Typecheck der Vertragsprobe | PASS |
-| SDK `testing-actions.test.ts` und `worker-rpc-host.test.ts` am Quell-Pin | PASS, 28/28 Tests |
+| Fingerprint for repository, tag, commit, tree, clean diff, source lock, registry lock, SDK/Shared integrity, runner and relevant files | PASS |
+| `npm ci --ignore-scripts` from the registry lock in an empty directory | PASS, 4 packages installed, 0 audit findings |
+| PostgreSQL 17 contract probe with installed registry SDK | PASS, 20/20 assertions |
+| Offline gateway negative probe | PASS, `networkCalls: 0`, `dispatches: 0`, five negative cases fail closed |
+| Contract probe typecheck | PASS |
+| SDK `testing-actions.test.ts` and `worker-rpc-host.test.ts` at the source pin | PASS, 28/28 tests |
 
-Diese ursprünglichen Prüfungen verwendeten ausschließlich synthetische Daten. Sie sind historische Hostnachweise und werden nicht als isolierter HUM-285-Gesamtlauf umgedeutet. Es gab keine Microsoft-Verbindung, keine echte Paperclip-Installation, keinen Host-Gateway-Aufruf oder Deployment.
+These original checks used synthetic data exclusively. They are historical host evidence and are not reinterpreted as a complete isolated HUM-285 run. There was no Microsoft connection, real Paperclip installation, host gateway call or deployment.
 
-## Restschätzung und kritischer Pfad
+## Remaining estimate and critical path
 
-| Paket | Restaufwand | Annahme |
+| Work package | Remaining effort | Assumption |
 | --- | --- | --- |
-| WP01 | 1–2 PT | Pin-Gate ist erledigt; Scaffold, Build, CI, Paketinhalt und isolierte Installationsprobe bleiben separat gesperrt bis Doppelreview. |
-| WP02 | 4–6 PT | Tenant-Prüfung und MSAL-/Cache-Arbeit unverändert. |
-| WP03 | 4–6 PT | Human-Entscheid, Auditkorrelation und separater Executor bleiben harte Gates. |
-| WP04 | 3–4 PT | Graph-Transport und Betriebsmetriken unverändert. |
-| WP05 | 2–3 PT | Mail-Lesepfad und Entwürfe unverändert. |
-| WP06 | 2–3 PT | Versand-/Löschambiguität unverändert. |
-| WP07 | 2–3 PT | Zeitzonen- und Kalenderkonkurrenz unverändert. |
-| WP08 | 3–5 PT | 4-MiB-Grenzen, Speicher und OneDrive-Konflikte unverändert. |
-| WP09 | 3–4 PT | vollständige serverseitige Autorisierungswiederholung unverändert. |
-| WP10 | 4–5 PT | echte Agenten-/Hostintegration, Betriebsnachweise und unabhängige Reviews unverändert. |
-| WP11 | 2–5 PT | Paket-, Restore-, Migrations-, Beobachtungs- und Rollbackdrill unverändert. |
-| **WP01–WP11 gesamt verbleibend** | **30–46 PT** | ohne Tenant-/Admin-Wartezeit und optionale WP12–WP15 |
+| WP01 | 1–2 person-days | Pin gate is complete; scaffold, build, CI, package contents and isolated installation probe remain separately blocked pending both reviews. |
+| WP02 | 4–6 person-days | Tenant validation and MSAL/cache work unchanged. |
+| WP03 | 4–6 person-days | Human decision, audit correlation and separate executor remain mandatory gates. |
+| WP04 | 3–4 person-days | Graph transport and operational metrics unchanged. |
+| WP05 | 2–3 person-days | Mail read path and drafts unchanged. |
+| WP06 | 2–3 person-days | Send/delete ambiguity unchanged. |
+| WP07 | 2–3 person-days | Time zone and calendar concurrency unchanged. |
+| WP08 | 3–5 person-days | 4 MiB limits, memory and OneDrive conflicts unchanged. |
+| WP09 | 3–4 person-days | Complete server-side authorization revalidation unchanged. |
+| WP10 | 4–5 person-days | Real agent/host integration, operational evidence and independent reviews unchanged. |
+| WP11 | 2–5 person-days | Package, restore, migration, observation and rollback drill unchanged. |
+| **WP01–WP11 total remaining** | **30–46 person-days** | Excluding tenant/admin waiting time and optional WP12–WP15 |
 
-Kritischer Pfad: Doppelreview dieses Pins → restliches WP01-Scaffold → WP02, WP03 und WP04 → Funktionspakete WP05–WP08 → WP09 → WP10 → WP11. Neue technische Abhängigkeiten sind der kurze Windows-Buildpfad für den Paperclip-Monorepo-Quelltest und die getrennte Prüfung von Quell- und Releaseversion. Die Rücknahme besteht aus dem Revert dieses Nachweisstands; es wurden weder Pluginzustand noch Schema, Secrets oder externe Systeme verändert.
+Critical path: both reviews of this pin → remaining WP01 scaffold → WP02, WP03 and WP04 → functional packages WP05–WP08 → WP09 → WP10 → WP11. New technical dependencies are the short Windows build path for the Paperclip monorepo source test and separate validation of source and release versions. Rollback consists of reverting this evidence revision; no plugin state, schema, secrets or external systems were changed.

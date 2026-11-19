@@ -17,6 +17,11 @@ See [WP02 authentication and account connections](docs/wp02-auth-connections.md)
 and [WP03 permissions and approvals](docs/wp03-governed-operations.md) for configuration,
 security behavior, verification boundaries, and rollback.
 
+## Repository language
+
+Write Markdown documentation and code comments in English. User-facing interface
+translations and Unicode test fixtures may use other languages.
+
 ## Build and verification
 
 The supported runtime is Node.js `24.22.1` with npm `11.19.1`. Dependencies are
