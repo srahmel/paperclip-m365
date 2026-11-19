@@ -404,7 +404,7 @@ export class ConnectionManager {
   }
 }
 
-function encryptCache(
+export function encryptCache(
   plaintext: string,
   key: CacheKey,
   companyId: string,

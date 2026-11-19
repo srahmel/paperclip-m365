@@ -15,6 +15,8 @@ import {
 import { MsalDeviceCodeProvider } from "./auth/msal-provider.js";
 import { SqlConnectionStore } from "./auth/sql-connection-store.js";
 import manifest from "./manifest.js";
+import { registerGovernance, type GovernanceFactory } from "./governance/runtime.js";
+import { GovernanceError } from "./governance/types.js";
 
 const PUBLIC_ACTION_ERRORS = new Set([
   "authenticated_human_required", "connection_management_forbidden", "authorization_unavailable",
@@ -30,6 +32,7 @@ type ManagerFactory = (context: PluginContext, companyId: string) => Promise<Con
 export function createM365Plugin(
   managerFactory?: ManagerFactory,
   authenticationSessions = new AuthenticationSessionRegistry(),
+  governanceFactory?: GovernanceFactory,
 ) {
   let runtimeContext: PluginContext | undefined;
   const resolveManager = managerFactory ?? ((ctx, companyId) =>
@@ -41,6 +44,7 @@ export function createM365Plugin(
         ctx.actions.register(name, async (params, context) => {
           try { return await handler(params, context); }
           catch (error) {
+            if (error instanceof GovernanceError) throw error;
             // Fixed allowlist, never interpolate an external exception or its cause.
             const code = error instanceof Error && PUBLIC_ACTION_ERRORS.has(error.message)
               ? error.message : "action_unavailable";
@@ -48,6 +52,18 @@ export function createM365Plugin(
           }
         });
       };
+      registerGovernance({
+        ctx, registerAction,
+        authorizeHuman: (context) => requireConnectionManager(ctx, context),
+        track: (operation) => authenticationSessions.track(operation),
+        factory: governanceFactory,
+        resolveKey: async (companyId) => {
+          const config = await ctx.config.get(companyId);
+          const reference = requireSecretRef(config.cacheEncryptionKey);
+          return { value: await ctx.secrets.resolve(reference, { companyId, configPath: "cacheEncryptionKey" }),
+            version: JSON.stringify(reference.version ?? "latest") };
+        },
+      });
       registerAction("company-readiness", async (_params, actionContext) => {
         const { companyId } = await requireConnectionManager(ctx, actionContext);
         return companyReadiness(ctx, companyId);
@@ -55,7 +71,7 @@ export function createM365Plugin(
       ctx.data.register("scaffold-status", async () => ({
         status: "ready" as const,
         version: manifest.version,
-        microsoftIntegration: "connection-management" as const,
+        microsoftIntegration: "governed-operations" as const,
       }));
 
       registerAction("connection-status", async (params, actionContext) => {
@@ -200,7 +216,8 @@ async function readAuthConfig(ctx: PluginContext, companyId: string) {
 async function probeDatabase(ctx: PluginContext) {
   // Identifiers originate from the host, but must still be safely quoted.
   const namespace = `"${ctx.db.namespace.replaceAll('"', '""')}"`;
-  await ctx.db.query(`SELECT company_id, id, status, error_code, generation, cache_version, cache_algorithm, cache_key_version, cache_iv, cache_ciphertext, cache_authentication_tag FROM ${namespace}.connections LIMIT 0`);
+  await ctx.db.query(`SELECT company_id, id, status, error_code, generation, policy_revision, policy_bindings, policy_approver_user_ids, cache_version, cache_algorithm, cache_key_version, cache_iv, cache_ciphertext, cache_authentication_tag FROM ${namespace}.connections LIMIT 0`);
+  await ctx.db.query(`SELECT company_id, id, state, snapshot_hash, executor_nonce, audit FROM ${namespace}.operations LIMIT 0`);
 }
 
 async function companyReadiness(ctx: PluginContext, companyId: string) {

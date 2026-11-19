@@ -78,6 +78,7 @@ try {
         { migrationKey: "001_scaffold_metadata.sql", status: "applied" },
         { migrationKey: "002_auth_connections.sql", status: "applied" },
         { migrationKey: "003_atomic_cache_state.sql", status: "applied" },
+        { migrationKey: "004_governed_operations.sql", status: "applied" },
       ],
       `${expectedStatus} changed the migration ledger`,
     );
@@ -122,7 +123,7 @@ try {
   assert.deepEqual(await harness.getData("scaffold-status"), {
     status: "ready",
     version: "0.1.0",
-    microsoftIntegration: "connection-management",
+    microsoftIntegration: "governed-operations",
   });
 
   const disabled = await lifecycle.disable(installed.id, "WP01 isolated rollback drill");
@@ -166,7 +167,7 @@ try {
     health: "ready",
     migrationCount: migrationRows.length,
     migrationKeys: migrationRows.map((row) => row.migrationKey),
-    microsoftIntegration: "connection-management",
+    microsoftIntegration: "governed-operations",
     namespace: namespaceRows[0]?.namespaceName,
     schemaVersion: 1,
     reEnabledPluginIdStable: true,

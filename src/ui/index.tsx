@@ -6,11 +6,12 @@ import {
 } from "@paperclipai/plugin-sdk/ui";
 import { translations } from "../auth/localization.js";
 import { ActionEpoch, AuthenticationPoller, type AuthenticationSession } from "./authentication-poller.js";
+import { GovernancePanel } from "./governance-panel.js";
 
 type ScaffoldStatus = {
   status: "ready";
   version: string;
-  microsoftIntegration: "connection-management";
+  microsoftIntegration: "governed-operations";
 };
 
 type PublicConnection = {
@@ -185,6 +186,12 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         </section>
       ) : null}
       {connection ? <output>{connection.displayName}: {connection.status}</output> : null}
+      {context.companyId && connectionId ? <GovernancePanel
+        key={`${context.companyId}:${connectionId}`}
+        companyId={context.companyId}
+        connectionId={connectionId}
+        locale={locale}
+      /> : null}
     </main>
   );
 }

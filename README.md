@@ -4,15 +4,17 @@ Package name: `paperclip-plugin-m365`
 
 Plugin ID: `srahmel.m365`
 
-The current WP02 package adds the authentication and account-connection
-foundation to the installable TypeScript plugin. It contains an MSAL provider,
+The current WP03 package adds agent permissions, immutable human approvals,
+and a separately reserved execution foundation to the installable TypeScript
+plugin. Authentication uses an MSAL provider,
 an encrypted versioned cache, host-authenticated administration actions, a
 React settings entrypoint, and additive plugin-owned schema migrations. It does
 not perform a real Microsoft sign-in or any Graph mail, calendar, or OneDrive
 operation as part of verification.
 
 See [WP02 authentication and account connections](docs/wp02-auth-connections.md)
-for configuration, security behavior, verification boundaries, and rollback.
+and [WP03 permissions and approvals](docs/wp03-governed-operations.md) for configuration,
+security behavior, verification boundaries, and rollback.
 
 ## Build and verification
 
@@ -36,9 +38,9 @@ only; secrets belong in the Paperclip Secret Store.
 
 ## Planned capabilities
 
-The remaining work packages add agent-specific connection permissions, immutable
-human-approved mutations, and Microsoft Graph mail, calendar, and OneDrive
-operations. These capabilities are not implemented by the authentication package.
+The remaining work packages add the Microsoft Graph transport and mail, calendar,
+and OneDrive operations. WP03 establishes their permission and approval boundaries;
+it does not enable a production Graph mutation handler.
 
 | Area | Planned first-version scope |
 | --- | --- |

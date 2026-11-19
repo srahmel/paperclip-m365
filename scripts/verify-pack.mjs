@@ -29,6 +29,7 @@ const requiredFiles = [
   "migrations/001_scaffold_metadata.sql",
   "migrations/002_auth_connections.sql",
   "migrations/003_atomic_cache_state.sql",
+  "migrations/004_governed_operations.sql",
   "package.json",
 ];
 for (const requiredFile of requiredFiles) {

@@ -139,6 +139,11 @@ try {
         (Join-Path $Repo 'tests/sql-connection-store.postgres.integration.ts')
     if ($LASTEXITCODE -ne 0) { throw 'Windows WP02 PostgreSQL integration failed' }
 
+    $phase = 'run-wp03-postgresql'
+    & node --import $importUrls[0] --test --test-reporter=tap --test-timeout=120000 `
+        (Join-Path $Repo 'tests/governance.postgres.integration.ts')
+    if ($LASTEXITCODE -ne 0) { throw 'Windows WP03 PostgreSQL integration failed' }
+
     $phase = 'run-host-lifecycle'
     Write-Output "::notice title=Windows lifecycle phase::$phase - starting node with 2 file URL imports"
     & node --import $importUrls[0] --import $importUrls[1] `

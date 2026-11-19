@@ -1,4 +1,5 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
+import { governanceTools } from "./governance/tool-declarations.js";
 
 const manifest: PaperclipPluginManifestV1 = {
   id: "srahmel.m365",
@@ -15,7 +16,13 @@ const manifest: PaperclipPluginManifestV1 = {
     "secrets.read-ref",
     "instance.settings.register",
     "access.members.read",
+    "agents.read",
+    "agent.tools.register",
+    "jobs.schedule",
   ],
+  tools: governanceTools,
+  jobs: [{ jobKey: "operation-retention", displayName: "M365 operation retention",
+    description: "Clear expired encrypted requests and quarantine stale execution reservations without retrying them.", schedule: "*/5 * * * *" }],
   entrypoints: {
     worker: "./dist/worker.js",
     ui: "./dist/ui",
