@@ -345,3 +345,37 @@ describe("durable telemetry incidents and delivery", () => {
     expect(f.incidents.some((item) => item.code === "unknown_present")).toBe(true);
   });
 });
+
+
+describe("company-scoped metric mirror evidence", () => {
+  const event: SignalEvent = { kind: "inventory", ...(({ at: _at, ...sample }) => sample)(inventory) };
+  it("isolates failed batches, heals on complete success, and expires or loses evidence honestly", async () => {
+    const f = fixture();
+    expect((await f.service.dashboard("company-a")).metrics).toBe("unverified");
+    f.metrics.write.mockRejectedValueOnce(new Error("synthetic private failure"));
+    await f.service.observe("company-a", event);
+    expect((await f.service.dashboard("company-a")).metrics).toBe("failed");
+    await f.service.observe("company-b", event);
+    expect((await f.service.dashboard("company-b")).metrics).toBe("accepted");
+    expect((await f.service.dashboard("company-a")).metrics).toBe("failed");
+    await f.service.observe("company-a", event);
+    expect((await f.service.dashboard("company-a")).metrics).toBe("accepted");
+    expect((await f.restart().dashboard("company-a")).metrics).toBe("unverified");
+    f.setNow(new Date(NOW.getTime() + 119_999));
+    expect((await f.service.dashboard("company-a")).metrics).toBe("accepted");
+    f.setNow(new Date(NOW.getTime() + 120_000));
+    const expired = await f.service.dashboard("company-a");
+    expect(expired.metrics).toBe("unverified"); expect(expired.status).not.toBe("within_thresholds");
+    expect(JSON.stringify(f.metrics.write.mock.calls)).not.toMatch(/company-a|company-b|synthetic private/);
+    const absent = new TelemetryService({ store: f.store, now: () => NOW });
+    expect((await absent.dashboard("company-a")).metrics).toBe("unconfigured");
+  });
+
+  it("evicts oldest company evidence at a fixed capacity without inventing success", async () => {
+    const f = fixture();
+    for (let index = 0; index <= 1024; index++) await f.service.observe(`scope-${index}`, event);
+    expect((await f.service.dashboard("scope-0")).metrics).toBe("unverified");
+    expect((await f.service.dashboard("scope-1")).metrics).toBe("accepted");
+    expect((await f.service.dashboard("scope-1024")).metrics).toBe("accepted");
+  });
+});

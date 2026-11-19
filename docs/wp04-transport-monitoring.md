@@ -56,6 +56,10 @@ no hidden-tab polling, clears old data on failures, and discards stale responses
 after unmount/company changes. The metrics SDK mirror alone is not an alarm path.
 The worker's own health callback cannot detect its own death; the independent
 watchdog evaluates the documented host dashboard outside the worker.
+SDK metric-mirror evidence is company-scoped and expires after 120 seconds. A
+successful complete mirror batch clears that company's transient failure. A
+bounded 1,024-entry cache reports missing/evicted/restarted evidence as unverified,
+not accepted; one company's adapter error cannot degrade another company's state.
 It also requires a fresh successful monitoring job: missing, stale or failed
 evaluation evidence is not healthy, even if the worker process is running. This
 can intentionally alarm during initial startup until the first evaluation
@@ -66,7 +70,10 @@ The company configuration accepts `telemetry.validatedCapacityBytes` and two
 routes, `telemetry.operatorRoute` and `telemetry.securityRoute`, each with a
 `projectId` and `userId`. Both routes must be explicitly configured; no default
 recipient is inferred. The adapter checks the target project and active human
-membership in the same company. It creates or finds an issue by a fixed plugin
+membership in the same company during readiness and again immediately before
+delivery. Missing/invalid destinations are unconfigured; API errors/timeouts are
+failed. Neither case consumes a delivery attempt before a route is validated.
+It creates or finds an issue by a fixed plugin
 origin and incident/channel key; the receipt identifies issue-queue acceptance.
 No real routes or notifications are configured by the tests. The scheduled
 evaluator processes up to 100 companies per invocation and persists its cursor

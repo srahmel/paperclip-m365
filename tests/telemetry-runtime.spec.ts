@@ -3,7 +3,7 @@ import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import type { Issue, Project } from "@paperclipai/shared";
 import { registerTelemetry } from "../src/telemetry/runtime.js";
 import { TelemetryService } from "../src/telemetry/telemetry-service.js";
-import { TelemetryError, type AlarmMessage } from "../src/telemetry/types.js";
+import { TelemetryError, type AlarmMessage, type TelemetryStore } from "../src/telemetry/types.js";
 import manifest from "../src/manifest.js";
 
 const companyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -22,6 +22,9 @@ const alarm: AlarmMessage = { idempotencyKey: "a".repeat(64), code: "authorizati
 function setup() {
   const harness = createTestHarness({ manifest });
   const config = vi.spyOn(harness.ctx.config, "get").mockResolvedValue({ telemetry });
+  vi.spyOn(harness.ctx.projects, "get").mockImplementation(async (id, scope) => ({ id, companyId: scope } as Project));
+  const at = new Date();
+  vi.spyOn(harness.ctx.access.members, "list").mockResolvedValue([userId, securityUser].map((principalId) => ({ id: principalId, companyId, principalType: "user", principalId, status: "active", membershipRole: "member", grants: [], createdAt: at, updatedAt: at })));
   const service = { dashboard: vi.fn().mockResolvedValue({ status: "insufficient_data", rules: [], incidents: [] }), acknowledge: vi.fn().mockResolvedValue(true), observe: vi.fn().mockResolvedValue(undefined), evaluate: vi.fn().mockResolvedValue(undefined) };
   let dependencies!: ConstructorParameters<typeof TelemetryService>[0];
   const authorizeHuman = vi.fn(async (context: Parameters<Parameters<typeof registerTelemetry>[0]["authorizeHuman"]>[0]) => {
@@ -35,6 +38,66 @@ function setup() {
 }
 
 describe("telemetry authenticated runtime boundary", () => {
+  it.each(["missing-project", "foreign-project", "wrong-project", "missing-member", "inactive-member", "foreign-member", "agent-member", "api-error"])("does not report or consume delivery attempts for %s routes", async (failure) => {
+    const f = setup();
+    const projects = vi.mocked(f.harness.ctx.projects.get);
+    const members = vi.mocked(f.harness.ctx.access.members.list);
+    if (failure === "missing-project") projects.mockResolvedValue(null);
+    if (failure === "foreign-project") projects.mockImplementation(async (id) => ({ id, companyId: otherCompany } as Project));
+    if (failure === "wrong-project") projects.mockResolvedValue({ id: incidentId, companyId } as Project);
+    if (failure === "missing-member") members.mockResolvedValue([]);
+    if (failure === "api-error") members.mockRejectedValue(new Error("private-membership-canary"));
+    if (["inactive-member", "foreign-member", "agent-member"].includes(failure)) {
+      const current = await members({ companyId });
+      members.mockResolvedValue(current.map((member) => ({ ...member,
+        status: failure === "inactive-member" ? "suspended" : member.status,
+        companyId: failure === "foreign-member" ? otherCompany : companyId,
+        principalType: failure === "agent-member" ? "agent" : member.principalType,
+      })));
+    }
+    if (failure === "api-error") await expect(f.dependencies.alarms!.isConfigured!(companyId)).rejects.toThrow(/^telemetry_configuration_unavailable$/);
+    else expect(await f.dependencies.alarms!.isConfigured!(companyId)).toBe(false);
+    const status = await f.harness.performAction("telemetry-status", {}, human);
+    const deliveryState = failure === "api-error" ? "failed" : "unconfigured";
+    expect(status).toMatchObject({ deliveryConfiguration: { operator: deliveryState, security: deliveryState } });
+    const claimDelivery = vi.fn();
+    const store = {
+      readBuckets: async () => [], getInventory: async () => null, listDailyBaselines: async () => [],
+      getRuleStates: async () => ({ revision: 0, states: [] }),
+      listIncidents: async () => [{ id: incidentId, deliveryState: "pending", attempts: 0 }], claimDelivery,
+    } as unknown as TelemetryStore;
+    const service = new TelemetryService({ ...f.dependencies, store });
+    await service.flush(companyId);
+    expect(claimDelivery).not.toHaveBeenCalled();
+    expect(await service.dashboard(companyId)).toMatchObject({ delivery: deliveryState, status: "insufficient_data" });
+    expect(JSON.stringify([status, f.harness.logs])).not.toContain("private-membership-canary");
+  });
+
+  it("reports each route independently and rechecks later membership revocation", async () => {
+    const f = setup();
+    expect(await f.dependencies.alarms!.isConfigured!(companyId)).toBe(true);
+    const members = vi.mocked(f.harness.ctx.access.members.list);
+    members.mockResolvedValue((await members({ companyId })).filter((member) => member.principalId === userId));
+    expect(await f.dependencies.alarms!.isConfigured!(companyId)).toBe(false);
+    expect(await f.harness.performAction("telemetry-status", {}, human)).toMatchObject({ deliveryConfiguration: { operator: "configured", security: "unconfigured" } });
+  });
+
+  it("bounds stalled route validation without creating issues", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = setup();
+      vi.mocked(f.harness.ctx.projects.get).mockImplementation(() => new Promise(() => undefined));
+      const create = vi.spyOn(f.harness.ctx.issues, "create");
+      const pending = f.dependencies.alarms!.isConfigured!(companyId);
+      const rejected = expect(pending).rejects.toThrow(/^telemetry_adapter_timeout$/);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await rejected;
+      const status = f.harness.performAction("telemetry-status", {}, human);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await status).toMatchObject({ deliveryConfiguration: { operator: "failed", security: "failed" } });
+      expect(create).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
   it("uses host company and actor for dashboard and acknowledgement, never request fields", async () => {
     const f = setup();
     const status = await f.harness.performAction("telemetry-status", { companyId: otherCompany }, human);
@@ -113,6 +176,17 @@ describe("telemetry issue alarm adapter", () => {
     const abort = new AbortController(); abort.abort();
     await expect(f.dependencies.alarms!.deliver(companyId, alarm, abort.signal)).rejects.toThrow("telemetry_adapter_timeout");
     expect(f.create).not.toHaveBeenCalled();
+  });
+
+  it("rechecks membership after issue lookup and never dispatches after revocation", async () => {
+    const f = await withRoutes();
+    expect(await f.dependencies.alarms!.isConfigured!(companyId)).toBe(true);
+    f.list.mockImplementation(async () => {
+      vi.mocked(f.harness.ctx.access.members.list).mockResolvedValue([]);
+      return [];
+    });
+    await expect(f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal)).rejects.toThrow("telemetry_configuration_unavailable");
+    expect(f.create).not.toHaveBeenCalled(); expect(f.update).not.toHaveBeenCalled();
   });
 });
 

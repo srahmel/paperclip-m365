@@ -17,7 +17,7 @@ export class TelemetryService {
   readonly #newId: () => string;
   readonly #adapterTimeoutMs: number;
   readonly #queues = new Map<string, Queue>();
-  #metricsFailed = false;
+  readonly #mirrorStatus = new Map<string, { at: number; status: "accepted" | "failed" }>();
   constructor(input: { store: TelemetryStore; metrics?: MetricsAdapter; alarms?: AlarmAdapter; adapterTimeoutMs?: number; now?: () => Date; newId?: () => string }) {
     this.#store = input.store; this.#metrics = input.metrics; this.#alarms = input.alarms;
     this.#now = input.now ?? (() => new Date()); this.#newId = input.newId ?? randomUUID;
@@ -58,7 +58,14 @@ export class TelemetryService {
       await this.#evaluate(companyId);
       await this.#flush(companyId);
       // At most five fixed-label mirrors share one bounded wait, rather than serial timeouts.
-      await Promise.all(mirrors.map((mirror) => this.#mirror(mirror.metric, mirror.value, mirror.labels)));
+      if (this.#metrics) {
+        const accepted = await Promise.all(mirrors.map((mirror) => this.#mirror(mirror.metric, mirror.value, mirror.labels)));
+        const at = this.#now().getTime();
+        this.#expireMirrorStatus(at);
+        this.#mirrorStatus.delete(companyId);
+        if (this.#mirrorStatus.size >= 1024) this.#mirrorStatus.delete(this.#mirrorStatus.keys().next().value!);
+        this.#mirrorStatus.set(companyId, { at, status: accepted.every(Boolean) ? "accepted" : "failed" });
+      }
     });
   }
 
@@ -84,12 +91,14 @@ export class TelemetryService {
       const incomplete = rules.some((rule) => rule.dataState !== "available");
       const configuration = await this.#alarmConfiguration(companyId);
       const delivery = configuration !== "configured" ? configuration : incidents.some((item) => item.deliveryState === "exhausted") ? "failed" : incidents.some((item) => item.deliveryState !== "delivered") ? "pending" : "accepted";
+      this.#expireMirrorStatus(now.getTime());
+      const metrics = !this.#metrics ? "unconfigured" : this.#mirrorStatus.get(companyId)?.status ?? "unverified";
       return {
         version: TELEMETRY_VERSION, evaluatedAt: now.toISOString(),
-        status: active.some((rule) => rule.severity === "critical") ? "critical" : active.length ? "warning" : incomplete || delivery !== "accepted" || this.#metricsFailed ? "insufficient_data" : "within_thresholds",
+        status: active.some((rule) => rule.severity === "critical") ? "critical" : active.length ? "warning" : incomplete || delivery !== "accepted" || metrics !== "accepted" ? "insufficient_data" : "within_thresholds",
         windowAlignment: "one-minute-buckets" as const,
         inventoryAt: data.inventory?.at ?? null, baselineDays: completeBaselines(data.baselines, now).length,
-        metrics: !this.#metrics ? "unconfigured" : this.#metricsFailed ? "failed" : "accepted",
+        metrics,
         delivery, operatorAcknowledgement: incidents.some((item) => item.acknowledgedAt === null) ? "outstanding" : "none_outstanding",
         rules, incidents,
       };
@@ -199,11 +208,16 @@ export class TelemetryService {
     catch { return "failed"; }
   }
 
-  async #mirror(metric: MetricName, value: number, labels: Labels) {
+  #expireMirrorStatus(now: number) {
+    // Two scheduled minute intervals; cache absence is never evidence of acceptance.
+    for (const [companyId, entry] of this.#mirrorStatus) if (now - entry.at >= 120_000 || now < entry.at) this.#mirrorStatus.delete(companyId);
+  }
+
+  async #mirror(metric: MetricName, value: number, labels: Labels): Promise<boolean> {
     validateLabels(metric, labels);
-    if (!this.#metrics) return;
-    try { await this.#bounded(() => this.#metrics!.write(metric, value, labels)); }
-    catch { this.#metricsFailed = true; }
+    if (!this.#metrics) return false;
+    try { await this.#bounded(() => this.#metrics!.write(metric, value, labels)); return true; }
+    catch { return false; }
   }
   async #bounded<T>(work: (signal: AbortSignal) => Promise<T>, timeoutMs = Math.min(this.#adapterTimeoutMs, 10_000)): Promise<T> {
     const controller = new AbortController();

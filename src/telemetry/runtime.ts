@@ -36,7 +36,11 @@ export function registerTelemetry(input: {
     };
   };
   const alarms: AlarmAdapter = {
-    async isConfigured(companyId) { const config = await configuration(companyId); return !!config.operatorRoute && !!config.securityRoute; },
+    async isConfigured(companyId) {
+      const config = await configuration(companyId);
+      const verified = await Promise.all([verifyRoute(ctx, companyId, config.operatorRoute), verifyRoute(ctx, companyId, config.securityRoute)]);
+      return verified.every(Boolean);
+    },
     async deliver(companyId, message, signal) {
       const config = await configuration(companyId);
       if (!config.operatorRoute || (message.security && !config.securityRoute)) throw new TelemetryError("telemetry_configuration_unavailable");
@@ -69,8 +73,13 @@ export function registerTelemetry(input: {
   action("telemetry-status", async (_params, context) => {
     const { companyId } = await input.authorizeHuman(context);
     const config = await configuration(companyId);
+    const routeStatus = async (target: Route | null) => {
+      try { return await verifyRoute(ctx, companyId, target) ? "configured" : "unconfigured"; }
+      catch { return "failed"; }
+    };
+    const [operator, security] = await Promise.all([routeStatus(config.operatorRoute), routeStatus(config.securityRoute)]);
     return { ...await service.dashboard(companyId),
-      deliveryConfiguration: { operator: config.operatorRoute ? "configured" : "unconfigured", security: config.securityRoute ? "configured" : "unconfigured", receiptMeaning: "issue-queue-acceptance-not-human-receipt" },
+      deliveryConfiguration: { operator, security, receiptMeaning: "issue-queue-acceptance-not-human-receipt" },
       storageMeasurement: { basis: "postgres-operation-row-datum-bytes-including-inline-audit", validatedCapacityBytes: config.validatedCapacityBytes },
     };
   });
@@ -124,9 +133,8 @@ export function registerTelemetry(input: {
 async function deliverIssue(ctx: PluginContext, companyId: string, target: Route, message: AlarmMessage, channel: "operations" | "security", signal: AbortSignal): Promise<string> {
   const check = () => { if (signal.aborted) throw new TelemetryError("telemetry_adapter_timeout"); };
   check();
-  const [project, members] = await Promise.all([ctx.projects.get(target.projectId, companyId), ctx.access.members.list({ companyId })]);
+  if (!await verifyRoute(ctx, companyId, target)) throw new TelemetryError("telemetry_configuration_unavailable");
   check();
-  if (!project || project.id !== target.projectId || project.companyId !== companyId || !members.some((member) => member.companyId === companyId && member.principalType === "user" && member.principalId === target.userId && member.status === "active")) throw new TelemetryError("telemetry_configuration_unavailable");
   const originId = `${message.idempotencyKey}:${channel}`;
   const prior = await ctx.issues.list({ companyId, originKind, originId, includePluginOperations: true, limit: 2 });
   check();
@@ -140,12 +148,30 @@ async function deliverIssue(ctx: PluginContext, companyId: string, target: Route
     "Acknowledge the matching incident in the M365 telemetry dashboard after the runbook step. Never retry unknown operations automatically.",
   ].join("\n");
   const patch = { title, description, priority: message.severity === "critical" ? "critical" as const : "high" as const, assigneeUserId: target.userId };
+  // Membership or project ownership may have changed while resolving the prior issue.
+  if (!await verifyRoute(ctx, companyId, target)) throw new TelemetryError("telemetry_configuration_unavailable");
+  check();
   const issue = prior[0]
     ? await ctx.issues.update(prior[0].id, patch, companyId)
     : await ctx.issues.create({ companyId, projectId: target.projectId, ...patch, status: "todo", originKind, originId });
   check();
   if (!issue || issue.companyId !== companyId || issue.projectId !== target.projectId || issue.assigneeUserId !== target.userId || issue.originId !== originId) throw new TelemetryError("telemetry_configuration_unavailable");
   return uuid(issue.id);
+}
+async function verifyRoute(ctx: PluginContext, companyId: string, target: Route | null): Promise<boolean> {
+  if (!target) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.all([ctx.projects.get(target.projectId, companyId), ctx.access.members.list({ companyId })]).then(([project, members]) =>
+        !!project && project.id === target.projectId && project.companyId === companyId && members.some((member) =>
+          member.companyId === companyId && member.principalType === "user" && member.principalId === target.userId && member.status === "active")),
+      new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new TelemetryError("telemetry_adapter_timeout")), 10_000); }),
+    ]);
+  } catch (error) {
+    throw new TelemetryError(error instanceof TelemetryError && error.code === "telemetry_adapter_timeout" ? "telemetry_adapter_timeout" : "telemetry_configuration_unavailable");
+  }
+  finally { if (timer) clearTimeout(timer); }
 }
 function route(value: unknown): Route | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
