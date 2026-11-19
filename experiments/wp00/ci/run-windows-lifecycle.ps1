@@ -84,7 +84,6 @@ $env:PAPERCLIP_PACKAGE_ARCHIVE = Join-Path $artifactDir (Split-Path -Leaf $artif
 $env:PAPERCLIP_PACKAGE_MANIFEST = $manifest
 $env:PAPERCLIP_SOURCE_REVISION = $SourceRevision
 $env:PAPERCLIP_REGISTRY_ROOT = $pluginInstall
-Remove-Item Env:PAPERCLIP_DATABASE_URL -ErrorAction SilentlyContinue
 $expected = Get-Content -Raw -LiteralPath (Join-Path $Repo 'experiments/wp00/expected-host-fingerprint.json') | ConvertFrom-Json
 $runner = Join-Path $source $expected.runner.relativeCliPath
 $tsxLoader = Join-Path (Split-Path -Parent $runner) 'loader.mjs'
@@ -95,41 +94,83 @@ if ($LASTEXITCODE -ne 0) { throw 'Windows import URL conversion failed' }
 $importUrls = $importUrlsJson | ConvertFrom-Json
 if ($importUrls.Count -ne 2) { throw 'Windows import URL conversion returned an unexpected result' }
 
-$phase = 'run-host-lifecycle'
 $lifecycleStdout = Join-Path $evidence 'plugin-lifecycle.stdout.jsonl'
 $lifecycleStderr = Join-Path $evidence 'plugin-lifecycle.stderr.log'
 $lifecycleEvidence = Join-Path $evidence 'plugin-lifecycle.jsonl'
-Write-Output "::notice title=Windows lifecycle phase::$phase - starting node with 2 file URL imports"
-& node --import $importUrls[0] --import $importUrls[1] `
-    (Join-Path $Repo 'tests/host-lifecycle.integration.mjs') `
-    1> $lifecycleStdout 2> $lifecycleStderr
-$lifecycleExitCode = $LASTEXITCODE
-$exitMarker = [ordered]@{
-    check = 'isolated-host-lifecycle-phase'
-    phase = 'process-exit'
-    sourceRevision = $SourceRevision
-    exitCode = $lifecycleExitCode
-} | ConvertTo-Json -Compress
-Add-Content -LiteralPath $lifecycleStderr -Value $exitMarker -Encoding utf8
-Copy-Item -LiteralPath $lifecycleStdout -Destination $lifecycleEvidence
-Get-Content -LiteralPath $lifecycleStdout | Write-Output
-Get-Content -LiteralPath $lifecycleStderr | Write-Output
-Write-Output "::notice title=Windows lifecycle phase::$phase - node exit code $lifecycleExitCode"
-if ($lifecycleExitCode -ne 0) { throw "Windows host lifecycle failed with exit code $lifecycleExitCode" }
+$postgresBin = Join-Path $source 'node_modules/.pnpm/@embedded-postgres+windows-x64@18.1.0-beta.16/node_modules/@embedded-postgres/windows-x64/native/bin'
+$initdb = Join-Path $postgresBin 'initdb.exe'
+$pgCtl = Join-Path $postgresBin 'pg_ctl.exe'
+$postgresData = Join-Path $Work 'postgres-data'
+$postgresLog = Join-Path $evidence 'postgresql.log'
+$postgresStarted = $false
 
-$lifecycle = Get-Content -Raw -LiteralPath $lifecycleEvidence
-if ([string]::IsNullOrWhiteSpace($lifecycle)) { throw 'Windows lifecycle evidence is empty' }
-$lifecyclePhases = Get-Content -Raw -LiteralPath $lifecycleStderr
-if ([string]::IsNullOrWhiteSpace($lifecyclePhases)) { throw 'Windows lifecycle phase evidence is empty' }
-& node (Join-Path $Repo 'scripts/lifecycle-evidence.mjs') `
-    $lifecycleEvidence $lifecycleStderr $SourceRevision
-if ($LASTEXITCODE -ne 0) { throw 'Windows lifecycle evidence is invalid' }
+foreach ($executable in @($initdb, $pgCtl)) {
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+        throw "Pinned PostgreSQL executable is missing: $executable"
+    }
+}
+
+$listener = [System.Net.Sockets.TcpListener]::new(
+    [System.Net.IPAddress]::Loopback,
+    0
+)
+$listener.Start()
+$postgresPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+$listener.Stop()
+
+try {
+    $phase = 'initialize-disposable-postgresql'
+    & $initdb -D $postgresData -U wp01_probe -A trust --encoding=UTF8 --no-locale
+    if ($LASTEXITCODE -ne 0) { throw 'disposable PostgreSQL initdb failed' }
+
+    $phase = 'start-disposable-postgresql'
+    & $pgCtl -D $postgresData -l $postgresLog `
+        -o "-h 127.0.0.1 -p $postgresPort -F" start -w
+    if ($LASTEXITCODE -ne 0) { throw 'disposable PostgreSQL start failed' }
+    $postgresStarted = $true
+    $env:PAPERCLIP_DATABASE_URL = "postgresql://wp01_probe@127.0.0.1:$postgresPort/postgres"
+
+    $phase = 'run-host-lifecycle'
+    Write-Output "::notice title=Windows lifecycle phase::$phase - starting node with 2 file URL imports"
+    & node --import $importUrls[0] --import $importUrls[1] `
+        (Join-Path $Repo 'tests/host-lifecycle.integration.mjs') `
+        1> $lifecycleStdout 2> $lifecycleStderr
+    $lifecycleExitCode = $LASTEXITCODE
+    $exitMarker = [ordered]@{
+        check = 'isolated-host-lifecycle-phase'
+        phase = 'process-exit'
+        sourceRevision = $SourceRevision
+        exitCode = $lifecycleExitCode
+    } | ConvertTo-Json -Compress
+    Add-Content -LiteralPath $lifecycleStderr -Value $exitMarker -Encoding utf8
+    Copy-Item -LiteralPath $lifecycleStdout -Destination $lifecycleEvidence
+    Get-Content -LiteralPath $lifecycleStdout | Write-Output
+    Get-Content -LiteralPath $lifecycleStderr | Write-Output
+    Write-Output "::notice title=Windows lifecycle phase::$phase - node exit code $lifecycleExitCode"
+    if ($lifecycleExitCode -ne 0) { throw "Windows host lifecycle failed with exit code $lifecycleExitCode" }
+
+    $lifecycle = Get-Content -Raw -LiteralPath $lifecycleEvidence
+    if ([string]::IsNullOrWhiteSpace($lifecycle)) { throw 'Windows lifecycle evidence is empty' }
+    $lifecyclePhases = Get-Content -Raw -LiteralPath $lifecycleStderr
+    if ([string]::IsNullOrWhiteSpace($lifecyclePhases)) { throw 'Windows lifecycle phase evidence is empty' }
+    & node (Join-Path $Repo 'scripts/lifecycle-evidence.mjs') `
+        $lifecycleEvidence $lifecycleStderr $SourceRevision
+    if ($LASTEXITCODE -ne 0) { throw 'Windows lifecycle evidence is invalid' }
+} finally {
+    Remove-Item Env:PAPERCLIP_DATABASE_URL -ErrorAction SilentlyContinue
+    if ($postgresStarted) {
+        $phase = 'stop-disposable-postgresql'
+        & $pgCtl -D $postgresData stop -m fast -w
+        if ($LASTEXITCODE -ne 0) { throw 'disposable PostgreSQL stop failed' }
+    }
+}
+
 [ordered]@{
     probe = 'wp01-windows-host-lifecycle'
     status = 'pass'
     sourceRevision = $SourceRevision
     hostCommit = 'd69631b01b9c658f80bf8bed389863dce82643e1'
-    database = 'disposable-embedded-postgresql'
+    database = 'disposable-loopback-postgresql'
     syntheticDataOnly = $true
     packageDigestVerifiedAt = @('install', 'restore')
 } | ConvertTo-Json -Compress

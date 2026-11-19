@@ -62,8 +62,8 @@ kein Netzwerk während der Zielausführung, read-only Quell-/Paket-Mounts,
 explizite Umgebung und Ressourcenlimits. Es baut zusätzlich das Plugin aus
 frischen Quellen, prüft den erwarteten Paketdigest unmittelbar vor Installation
 und Restore und führt den Host-Lifecycle-Drill aus. Ein eigener Windows-2025-Job
-führt denselben Drill gegen den exakten Host-Pin und ein wegwerfbares Embedded
-PostgreSQL aus. Ein nachgelagerter Job lädt beide OS-Pakete herunter, vergleicht
+führt denselben Drill gegen den exakten Host-Pin und einen wegwerfbaren,
+loopback-only PostgreSQL-Cluster aus. Ein nachgelagerter Job lädt beide OS-Pakete herunter, vergleicht
 Archiv-SHA-256 und normalisierte Inhaltslisten fail-closed und veröffentlicht
 genau ein nach Commit und SHA-256 benanntes Abnahmeartefakt.
 
@@ -97,7 +97,9 @@ in einen frischen Task-Scratch. Anschließend verwendet er den Produktions-
 `pluginLoader`, Produktions-Migrationsvalidator und Lifecycle-Manager des exakt
 gepinnten Paperclip-Commits
 `d69631b01b9c658f80bf8bed389863dce82643e1` gegen eine wegwerfbare
-Embedded-Postgres-Instanz. Der saubere Pin-Checkout wird nicht verändert; der
+PostgreSQL-Instanz, die mit den gepinnten Windows-Binaries über `initdb` und
+`pg_ctl` ausschließlich an `127.0.0.1` gestartet und im `finally` gestoppt wird.
+Der Lifecycle nutzt dafür seinen vorhandenen External-DB-Pfad. Der saubere Pin-Checkout wird nicht verändert; der
 SDK-Laufzeitimport verweist auf das bereits SRI-geprüfte Registry-Artefakt.
 
 Belegte Zustandsfolge auf demselben Datensatz:
@@ -129,7 +131,7 @@ Dateien, falsche Reihenfolge, unvollständige Zustandsfolge und ein Exitcode ung
 zusätzlich Bytezahl und SHA-256 in der Job-Zusammenfassung.
 
 Der fünfminütige Test-Watchdog hält als ausdrücklich referenzierter Node-Handle
-das Standalone-Harness auch während des Embedded-PostgreSQL-Starts am Leben. Er
+das Standalone-Harness auch während des Datenbank-/Lifecycle-Starts am Leben. Er
 wird erst nach `temporary.cleanup()` gelöscht; ein Stillstand wird als Timeout-
 Fehler beendet und kann daher weder als Exitcode 0 noch als leere PASS-Evidence
 durchlaufen.
