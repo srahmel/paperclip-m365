@@ -15,4 +15,20 @@ describe("plugin schema migration", () => {
     expect(sql).not.toMatch(/\b(?:ALTER|DROP|TRUNCATE|DELETE|UPDATE)\b/i);
     expect(sql).not.toContain("public.");
   });
+
+  it("adds company-scoped connections and encrypted versioned token caches", async () => {
+    const sql = await readFile(
+      new URL("../migrations/002_auth_connections.sql", import.meta.url),
+      "utf8",
+    );
+
+    expect(sql).toContain("PRIMARY KEY (company_id, id)");
+    expect(sql).toContain("PRIMARY KEY (company_id, connection_id)");
+    expect(sql).toContain("cache_version bigint NOT NULL");
+    expect(sql).toContain("generation bigint NOT NULL DEFAULT 1 CHECK (generation > 0)");
+    expect(sql).toContain("algorithm = 'aes-256-gcm'");
+    expect(sql).toContain("ON DELETE CASCADE");
+    expect(sql).not.toMatch(/\b(?:ALTER|DROP|TRUNCATE)\b/i);
+    expect(sql).not.toContain("public.");
+  });
 });

@@ -4,10 +4,15 @@ Package name: `paperclip-plugin-m365`
 
 Plugin ID: `srahmel.m365`
 
-The current WP01 package is an installable TypeScript scaffold. It contains a
-Paperclip worker, a React settings entrypoint, and an additive plugin-owned
-schema migration. It does not contain Microsoft authentication, Graph calls,
-mail, calendar, OneDrive, production configuration, or customer data.
+The current WP02 package adds the authentication and account-connection
+foundation to the installable TypeScript plugin. It contains an MSAL provider,
+an encrypted versioned cache, host-authenticated administration actions, a
+React settings entrypoint, and additive plugin-owned schema migrations. It does
+not perform a real Microsoft sign-in or any Graph mail, calendar, or OneDrive
+operation as part of verification.
+
+See [WP02 authentication and account connections](docs/wp02-auth-connections.md)
+for configuration, security behavior, verification boundaries, and rollback.
 
 ## Build and verification
 

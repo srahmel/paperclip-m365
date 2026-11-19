@@ -3,7 +3,7 @@ name: WP01 plugin package
 on:
   workflow_dispatch:
   push:
-    branches: [hum-323-wp01-scaffold]
+    branches: [hum-323-wp01-scaffold, hum-344-wp02-auth-connections]
   pull_request:
 
 permissions:
@@ -74,13 +74,13 @@ jobs:
           node-version: 24.22.1
 
       - name: Download Linux package candidate
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: paperclip-plugin-m365-linux-${{ github.sha }}
           path: ${{ runner.temp }}/linux
 
       - name: Download Windows package candidate
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: paperclip-plugin-m365-windows-${{ github.sha }}
           path: ${{ runner.temp }}/windows

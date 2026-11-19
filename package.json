@@ -32,6 +32,7 @@
     "verify": "npm run check:policy && npm run typecheck && npm test && npm run build && npm run pack:verify"
   },
   "dependencies": {
+    "@azure/msal-node": "7.2.3",
     "@paperclipai/plugin-sdk": "2026.1106.0",
     "@paperclipai/shared": "2026.1106.0"
   },

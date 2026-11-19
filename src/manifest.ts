@@ -11,7 +11,10 @@ const manifest: PaperclipPluginManifestV1 = {
   capabilities: [
     "database.namespace.migrate",
     "database.namespace.read",
+    "database.namespace.write",
+    "secrets.read-ref",
     "instance.settings.register",
+    "access.members.read",
   ],
   entrypoints: {
     worker: "./dist/worker.js",
