@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   usePluginAction,
   usePluginData,
   type PluginSettingsPageProps,
 } from "@paperclipai/plugin-sdk/ui";
 import { translations } from "../auth/localization.js";
-import { AuthenticationPoller, type AuthenticationSession } from "./authentication-poller.js";
+import { ActionEpoch, AuthenticationPoller, type AuthenticationSession } from "./authentication-poller.js";
 
 type ScaffoldStatus = {
   status: "ready";
@@ -60,39 +60,39 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
   const [, setAuthenticationSession] = useState<AuthenticationSession | null>(null);
   const [challenge, setChallenge] = useState<AuthenticationChallenge | null>(null);
   const [authenticationPoller] = useState(() => new AuthenticationPoller());
-  const actionGeneration = useRef(0);
+  const [actionEpoch] = useState(() => new ActionEpoch());
   const locale = typeof document === "undefined" ? "en" : document.documentElement.lang;
   const t = translations(locale);
 
   useEffect(() => () => authenticationPoller.stop(), [authenticationPoller]);
 
   useEffect(() => {
-    actionGeneration.current += 1;
+    actionEpoch.invalidate();
     authenticationPoller.stop();
     setAuthenticationSession(null);
     setChallenge(null);
     setConnection(null);
     setConnectionId("");
-  }, [context.companyId, authenticationPoller]);
+  }, [context.companyId, actionEpoch, authenticationPoller]);
 
   async function run(action: () => Promise<unknown>) {
-    const generation = ++actionGeneration.current;
+    const generation = actionEpoch.start();
     authenticationPoller.stop();
     setAuthenticationSession(null);
     setChallenge(null);
     setActionError(false);
     try {
       const next = await action() as PublicConnection;
-      if (generation !== actionGeneration.current) return;
+      if (!actionEpoch.isCurrent(generation)) return;
       setConnection(next);
     } catch {
-      if (generation !== actionGeneration.current) return;
+      if (!actionEpoch.isCurrent(generation)) return;
       setActionError(true);
     }
   }
 
   async function begin(action: () => Promise<unknown>) {
-    const generation = ++actionGeneration.current;
+    const generation = actionEpoch.start();
     authenticationPoller.stop();
     setActionError(false);
     setAuthenticationSession(null);
@@ -100,7 +100,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
     setConnection(null);
     try {
       const session = await action() as AuthenticationSession;
-      if (generation !== actionGeneration.current) return;
+      if (!actionEpoch.isCurrent(generation)) return;
       setConnectionId(session.connectionId);
       setAuthenticationSession(session);
       setChallenge(session.challenge ?? null);
@@ -111,18 +111,18 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
           connectionId: current.connectionId,
         }) as AuthenticationSession,
         onUpdate: (next) => {
-          if (generation !== actionGeneration.current) return;
+          if (!actionEpoch.isCurrent(generation)) return;
           setAuthenticationSession(next);
           setChallenge(next.challenge ?? null);
         },
         onTerminal: () => {
-          if (generation !== actionGeneration.current) return;
+          if (!actionEpoch.isCurrent(generation)) return;
           setAuthenticationSession(null);
           setChallenge(null);
           setConnection(null);
         },
         onError: () => {
-          if (generation !== actionGeneration.current) return;
+          if (!actionEpoch.isCurrent(generation)) return;
           setAuthenticationSession(null);
           setChallenge(null);
           setConnection(null);
@@ -130,13 +130,13 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         },
       });
     } catch {
-      if (generation !== actionGeneration.current) return;
+      if (!actionEpoch.isCurrent(generation)) return;
       setActionError(true);
     }
   }
 
   async function disconnectConnection() {
-    actionGeneration.current += 1;
+    actionEpoch.invalidate();
     authenticationPoller.stop();
     setAuthenticationSession(null);
     setChallenge(null);

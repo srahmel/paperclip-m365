@@ -10,6 +10,23 @@ type Scheduler = {
   clear(handle: unknown): void;
 };
 
+export class ActionEpoch {
+  #generation = 0;
+
+  start(): number {
+    this.#generation += 1;
+    return this.#generation;
+  }
+
+  invalidate(): void {
+    this.#generation += 1;
+  }
+
+  isCurrent(generation: number): boolean {
+    return generation === this.#generation;
+  }
+}
+
 export class AuthenticationPoller {
   readonly #scheduler: Scheduler;
   #generation = 0;
@@ -37,7 +54,11 @@ export class AuthenticationPoller {
       this.#timer = this.#scheduler.set(() => { void poll(); }, 1_000);
     };
     const poll = async () => {
-      if (generation !== this.#generation || this.#inFlight) return;
+      if (generation !== this.#generation) return;
+      if (this.#inFlight) {
+        schedule();
+        return;
+      }
       this.#inFlight = true;
       try {
         const next = await input.load(input.session);
