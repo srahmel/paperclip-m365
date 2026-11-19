@@ -120,13 +120,19 @@ Migration, Namespace und Health maschinenlesbar aus.
 Auf Windows ist die Evidence absichtlich getrennt: `plugin-lifecycle.stdout.jsonl`
 und die identische kanonische `plugin-lifecycle.jsonl` enthalten ausschließlich
 den vollständigen Lifecycle-Enddatensatz. `plugin-lifecycle.stderr.log` enthält
-die geordneten JSONL-Phasen `loader-start`, `host-initialized`,
+die geordneten JSONL-Phasen `watchdog-armed`, `loader-start`, `host-initialized`,
 `database-lifecycle-start`, `database-started`, `lifecycle-complete` und den vom
 PowerShell-Runner ergänzten nativen `process-exit`-Marker. Auf einem erfolgreichen
 Lauf ist stderr deshalb nicht leer; nicht-JSON-Ausgabe, fehlende oder leere
 Dateien, falsche Reihenfolge, unvollständige Zustandsfolge und ein Exitcode ungleich
 `0` schlagen fail-closed fehl. Der Workflow veröffentlicht für jede Evidence-Datei
 zusätzlich Bytezahl und SHA-256 in der Job-Zusammenfassung.
+
+Der fünfminütige Test-Watchdog hält als ausdrücklich referenzierter Node-Handle
+das Standalone-Harness auch während des Embedded-PostgreSQL-Starts am Leben. Er
+wird erst nach `temporary.cleanup()` gelöscht; ein Stillstand wird als Timeout-
+Fehler beendet und kann daher weder als Exitcode 0 noch als leere PASS-Evidence
+durchlaufen.
 
 Grenze: Der Drill prüft Loader, Migrations- und Lifecycle-Persistenz sowie den
 gebauten Worker über die öffentliche SDK-Harness-Schnittstelle. Er ist keine

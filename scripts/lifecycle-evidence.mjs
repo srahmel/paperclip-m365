@@ -16,6 +16,7 @@ const expectedStates = [
 ];
 
 const expectedPhases = [
+  "watchdog-armed",
   "loader-start",
   "host-initialized",
   "database-lifecycle-start",

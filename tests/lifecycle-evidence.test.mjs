@@ -10,6 +10,7 @@ import {
 
 const revision = "a".repeat(40);
 const phases = [
+  "watchdog-armed",
   "loader-start",
   "host-initialized",
   "database-lifecycle-start",

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { verifyArtifactFile } from "../scripts/package-integrity.mjs";
+import { createLifecycleWatchdog } from "../scripts/lifecycle-watchdog.mjs";
 
 const paperclipSource = process.env.PAPERCLIP_SOURCE;
 const packageRoot = process.env.PAPERCLIP_PACKAGE_ROOT;
@@ -23,6 +24,8 @@ const emitPhase = (phase) => console.error(JSON.stringify({
 const fromPaperclip = (relativePath) => pathToFileURL(resolve(paperclipSource, relativePath)).href;
 const fromPackage = (relativePath) => pathToFileURL(resolve(packageRoot, relativePath)).href;
 
+const lifecycleWatchdog = createLifecycleWatchdog();
+emitPhase("watchdog-armed");
 emitPhase("loader-start");
 const dbModule = await import(fromPaperclip("packages/db/src/index.ts"));
 const loaderModule = await import(fromPaperclip("server/src/services/plugin-loader.ts"));
@@ -160,5 +163,9 @@ try {
     microsoftCalls: 0,
   }));
 } finally {
-  await temporary.cleanup();
+  try {
+    await temporary.cleanup();
+  } finally {
+    lifecycleWatchdog.clear();
+  }
 }
