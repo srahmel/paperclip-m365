@@ -16,6 +16,8 @@ The stored MSAL cache is encrypted with AES-256-GCM. Its authenticated additiona
 
 Each cache row has a monotonically increasing version, and every connection has a persistent generation. Cache compare-and-swap and status updates require both the expected cache version and connection generation. Disconnect increments the generation before deleting the cache. Sign-in, token, or cache results that started under an older generation cannot restore a disconnected connection or recreate its cache, including across workers or process restarts.
 
+Cache persistence locks the matching connection row in the same PostgreSQL statement that checks status and generation. This serializes it with disconnect's connection update: a cache write that wins first is followed by disconnect's cache deletion, while a disconnect that wins first makes the stale cache write ineligible. The isolated PostgreSQL 17 test deliberately pauses the cache statement after its eligibility snapshot and before commit, completes the competing path, and verifies that the final cache remains absent. No transaction API beyond the documented single-statement database contract is assumed.
+
 Connections are records in their own right. Setting `shareable` only records that a connection may later be assigned for shared use. It does not grant any agent access. Agent authorization remains WP03.
 
 ## Configuration
@@ -44,7 +46,7 @@ The page reads Paperclip's document language, supports German and English, and f
 
 Device codes are never emitted on a shared stream. Sign-in start returns only a random operation ID and connection ID. A short-lived authenticated status action binds the challenge to the host-authorized company, initiating user, connection, and operation. Another administrator in the same company, another company, another connection, an expired operation, replay after challenge consumption, and access after disconnect all fail closed. Codes are not written to logs or exposed as agent tools. Access tokens and serialized caches never leave the manager/provider seam.
 
-The authentication registry tracks device-code polling, silent token work, and cache persistence. `onIdleDrain` returns `present` while any tracked operation or cleanup remains and `none` only after the last operation settles. `onShutdown` closes admission, aborts device-code polling through MSAL's cancellation contract, clears pending challenges, and awaits tracked cleanup so no delayed cache or transport result is accepted afterward.
+The authentication registry tracks device-code polling, silent token work, and cache persistence. `onIdleDrain` returns `present` while any tracked operation or cleanup remains and `none` only after the last operation settles. `onShutdown` closes admission, requests cancellation, clears pending challenges, and awaits tracked cleanup so no delayed cache or transport result is accepted afterward. MSAL silent acquisition has no underlying cancellation primitive; an abort therefore suppresses its result but remains tracked until the provider promise actually settles. A signal already aborted before dispatch prevents the MSAL call from starting.
 
 ## Fail-closed behavior
 
@@ -65,7 +67,7 @@ No other action was upgraded. The existing workflow still downloads the Linux an
 
 ## Verification boundary
 
-Synthetic tests cover separated accounts and companies, restart cache restoration, exactly one concurrent cache update winner, two-manager SQL generation CAS, delayed sign-in/token results after disconnect, canonical key validation before cache access, cache tampering, interaction-required and revoked-consent states, host grant enforcement, initiator/session isolation, expiry/replay/disconnect, lifecycle drain/shutdown behavior, content-free logs/action results, and deterministic localization.
+Synthetic tests cover separated accounts and companies, restart cache restoration, exactly one concurrent cache update winner, two-manager SQL generation CAS, delayed sign-in/token results after disconnect, canonical key validation before cache access, cache tampering, interaction-required and revoked-consent states, host grant enforcement, initiator/session isolation, expiry/replay/disconnect, lifecycle drain/shutdown behavior, content-free logs/action results, and deterministic localization. The isolated host gate additionally executes four cases against PostgreSQL 17 and the host's actual runtime SQL validators: concurrent cache CAS, controlled cache/disconnect lock interleaving, delayed provider completion after disconnect, and concurrent reconnect/disconnect generation rejection. Host lifecycle evidence requires the exact ordered migrations `001_scaffold_metadata.sql` and `002_auth_connections.sql` plus `microsoftIntegration=connection-management`; missing, duplicate, reordered, or contradictory evidence fails closed.
 
 An actual Microsoft device-code sign-in, tenant policy, delegated consent, and real account identity remain unverified and require separate explicit authorization. Production installation, migration, deployment, restart, and Graph operations were not performed.
 

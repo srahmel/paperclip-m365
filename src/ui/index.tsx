@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   usePluginAction,
   usePluginData,
   type PluginSettingsPageProps,
 } from "@paperclipai/plugin-sdk/ui";
 import { translations } from "../auth/localization.js";
+import { AuthenticationPoller, type AuthenticationSession } from "./authentication-poller.js";
 
 type ScaffoldStatus = {
   status: "ready";
@@ -29,12 +30,19 @@ type AuthenticationChallenge = {
   expiresAt: string;
 };
 
-type AuthenticationSession = {
-  operationId: string;
+export function buildStartSignInParams(input: {
   connectionId: string;
-  state?: "pending" | "challenge" | "completed" | "failed";
-  challenge?: AuthenticationChallenge;
-};
+  expectedTenantId: string;
+  displayName: string;
+  shareable: boolean;
+}) {
+  return {
+    ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+    expectedTenantId: input.expectedTenantId,
+    displayName: input.displayName,
+    shareable: input.shareable,
+  };
+}
 
 export function SettingsPage({ context }: PluginSettingsPageProps) {
   const { data, loading, error } = usePluginData<ScaffoldStatus>("scaffold-status");
@@ -49,46 +57,90 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
   const [shareable, setShareable] = useState(false);
   const [connection, setConnection] = useState<PublicConnection | null>(null);
   const [actionError, setActionError] = useState(false);
-  const [authenticationSession, setAuthenticationSession] = useState<AuthenticationSession | null>(null);
+  const [, setAuthenticationSession] = useState<AuthenticationSession | null>(null);
   const [challenge, setChallenge] = useState<AuthenticationChallenge | null>(null);
+  const [authenticationPoller] = useState(() => new AuthenticationPoller());
+  const actionGeneration = useRef(0);
   const locale = typeof document === "undefined" ? "en" : document.documentElement.lang;
   const t = translations(locale);
 
+  useEffect(() => () => authenticationPoller.stop(), [authenticationPoller]);
+
   useEffect(() => {
-    if (!authenticationSession || authenticationSession.state === "completed" || authenticationSession.state === "failed") return;
-    const poll = window.setInterval(() => {
-      void loadAuthenticationSession({
-        operationId: authenticationSession.operationId,
-        connectionId: authenticationSession.connectionId,
-      }).then((value) => {
-        const next = value as AuthenticationSession;
-        setAuthenticationSession(next);
-        if (next.challenge) setChallenge(next.challenge);
-        if (next.state === "completed") {
-          void run(() => loadStatus({ connectionId: next.connectionId }));
-        }
-      }).catch(() => setActionError(true));
-    }, 1_000);
-    return () => window.clearInterval(poll);
-  }, [authenticationSession, loadAuthenticationSession, loadStatus]);
+    actionGeneration.current += 1;
+    authenticationPoller.stop();
+    setAuthenticationSession(null);
+    setChallenge(null);
+    setConnection(null);
+    setConnectionId("");
+  }, [context.companyId, authenticationPoller]);
 
   async function run(action: () => Promise<unknown>) {
+    const generation = ++actionGeneration.current;
+    authenticationPoller.stop();
+    setAuthenticationSession(null);
+    setChallenge(null);
     setActionError(false);
     try {
-      setConnection(await action() as PublicConnection);
+      const next = await action() as PublicConnection;
+      if (generation !== actionGeneration.current) return;
+      setConnection(next);
     } catch {
+      if (generation !== actionGeneration.current) return;
       setActionError(true);
     }
   }
 
   async function begin(action: () => Promise<unknown>) {
+    const generation = ++actionGeneration.current;
+    authenticationPoller.stop();
     setActionError(false);
+    setAuthenticationSession(null);
     setChallenge(null);
+    setConnection(null);
     try {
-      setAuthenticationSession(await action() as AuthenticationSession);
+      const session = await action() as AuthenticationSession;
+      if (generation !== actionGeneration.current) return;
+      setConnectionId(session.connectionId);
+      setAuthenticationSession(session);
+      setChallenge(session.challenge ?? null);
+      authenticationPoller.start({
+        session,
+        load: async (current) => await loadAuthenticationSession({
+          operationId: current.operationId,
+          connectionId: current.connectionId,
+        }) as AuthenticationSession,
+        onUpdate: (next) => {
+          if (generation !== actionGeneration.current) return;
+          setAuthenticationSession(next);
+          setChallenge(next.challenge ?? null);
+        },
+        onTerminal: () => {
+          if (generation !== actionGeneration.current) return;
+          setAuthenticationSession(null);
+          setChallenge(null);
+          setConnection(null);
+        },
+        onError: () => {
+          if (generation !== actionGeneration.current) return;
+          setAuthenticationSession(null);
+          setChallenge(null);
+          setConnection(null);
+          setActionError(true);
+        },
+      });
     } catch {
+      if (generation !== actionGeneration.current) return;
       setActionError(true);
     }
+  }
+
+  async function disconnectConnection() {
+    actionGeneration.current += 1;
+    authenticationPoller.stop();
+    setAuthenticationSession(null);
+    setChallenge(null);
+    await run(() => disconnect({ connectionId }));
   }
 
   return (
@@ -116,8 +168,13 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
       </label>
       <div style={{ display: "flex", gap: "0.5rem" }}>
         <button type="button" onClick={() => run(() => loadStatus({ connectionId }))}>{t.status}</button>
-        <button type="button" onClick={() => begin(() => startSignIn({ connectionId, expectedTenantId, displayName, shareable }))}>{t.signIn}</button>
-        <button type="button" onClick={() => run(() => disconnect({ connectionId }))}>{t.disconnect}</button>
+        <button type="button" onClick={() => begin(() => startSignIn(buildStartSignInParams({
+          connectionId,
+          expectedTenantId,
+          displayName,
+          shareable,
+        })))}>{t.signIn}</button>
+        <button type="button" onClick={() => { void disconnectConnection(); }}>{t.disconnect}</button>
         <button type="button" onClick={() => begin(() => reactivate({ connectionId }))}>{t.reactivate}</button>
       </div>
       {challenge ? (

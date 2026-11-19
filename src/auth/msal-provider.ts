@@ -71,6 +71,7 @@ export class MsalDeviceCodeProvider implements MicrosoftAuthProvider {
   }
 
   async acquireToken(input: Parameters<MicrosoftAuthProvider["acquireToken"]>[0]) {
+    throwIfAborted(input.signal);
     const application = this.#application(input.account.tenantId);
     application.getTokenCache().deserialize(input.serializedCache);
     const cachedAccount = await application.getTokenCache().getAccountByHomeId(input.account.homeAccountId);
@@ -115,12 +116,24 @@ export class MsalDeviceCodeProvider implements MicrosoftAuthProvider {
 
 async function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
-  if (signal.aborted) throw signal.reason ?? new Error("operation_aborted");
+  throwIfAborted(signal);
   return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(signal.reason ?? new Error("operation_aborted"));
+    let aborted = false;
+    let abortReason: unknown;
+    const abort = () => {
+      aborted = true;
+      abortReason = signal.reason ?? new Error("operation_aborted");
+    };
     signal.addEventListener("abort", abort, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    promise.then(
+      (value) => aborted ? reject(abortReason) : resolve(value),
+      (error) => reject(aborted ? abortReason : error),
+    ).finally(() => signal.removeEventListener("abort", abort));
   });
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason ?? new Error("operation_aborted");
 }
 
 function requireAccount(result: AuthenticationResult | null): AccountInfo {

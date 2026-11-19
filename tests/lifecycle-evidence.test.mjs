@@ -37,7 +37,9 @@ const result = {
   states: ["absent", "installed", "ready", "disabled", "ready", "disabled", "uninstalled", "installed", "ready"],
   readOnlySmoke: "scaffold-status",
   health: "ready",
-  migrationCount: 1,
+  migrationCount: 2,
+  migrationKeys: ["001_scaffold_metadata.sql", "002_auth_connections.sql"],
+  microsoftIntegration: "connection-management",
   namespace: "plugin_m365_8b2a74e8fa",
   schemaVersion: 1,
   reEnabledPluginIdStable: true,
@@ -55,6 +57,10 @@ test("canonical lifecycle evidence rejects empty, invalid, incomplete, and marke
     JSON.stringify({}),
     jsonl(phases),
     JSON.stringify({ ...result, states: result.states.slice(0, -1) }),
+    JSON.stringify({ ...result, migrationKeys: ["001_scaffold_metadata.sql"] }),
+    JSON.stringify({ ...result, migrationKeys: ["001_scaffold_metadata.sql", "001_scaffold_metadata.sql"] }),
+    JSON.stringify({ ...result, migrationKeys: ["002_auth_connections.sql", "001_scaffold_metadata.sql"] }),
+    JSON.stringify({ ...result, microsoftIntegration: "not-configured" }),
   ]) {
     assert.throws(() => assertLifecycleEvidence(evidence, jsonl(phases), revision));
   }

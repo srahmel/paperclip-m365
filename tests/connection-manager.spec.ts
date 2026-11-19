@@ -15,6 +15,7 @@ class MemoryConnectionStore implements ConnectionStore {
   readonly connections = new Map<string, ConnectionRecord>();
   readonly caches = new Map<string, { envelope: EncryptedCache; version: number }>();
   readCacheCalls = 0;
+  afterDisconnect: (() => Promise<void>) | null = null;
 
   async create(connection: ConnectionRecord): Promise<void> {
     this.connections.set(this.key(connection.companyId, connection.id), structuredClone(connection));
@@ -64,6 +65,9 @@ class MemoryConnectionStore implements ConnectionStore {
     connection.updatedAt = updatedAt;
     connection.errorCode = null;
     this.caches.delete(key);
+    const hook = this.afterDisconnect;
+    this.afterDisconnect = null;
+    if (hook) await hook();
     return true;
   }
 
@@ -432,6 +436,30 @@ describe("ConnectionManager", () => {
       tenantId: "tenant-a",
     });
     expect(store.caches.get("company-a:connection-a")?.version).toBe(1);
+  });
+
+  it("does not adopt a newer generation from a concurrent disconnect during reactivation", async () => {
+    const store = new MemoryConnectionStore();
+    const provider = new SyntheticProvider({
+      "connection-a": { homeAccountId: "account-a", tenantId: "tenant-a", username: "a@example.test" },
+    });
+    const managerA = new ConnectionManager({ store, provider, resolveCacheKey: async () => cacheKey });
+    const managerB = new ConnectionManager({ store, provider, resolveCacheKey: async () => cacheKey });
+    await managerA.createAndSignIn({
+      companyId: "company-a",
+      connectionId: "connection-a",
+      expectedTenantId: "tenant-a",
+      displayName: "Alice",
+      shareable: false,
+    });
+    store.afterDisconnect = () => managerB.disconnect("company-a", "connection-a");
+
+    await expect(managerA.prepareReactivation("company-a", "connection-a"))
+      .rejects.toEqual(new ConnectionAccessError("operation_invalidated"));
+    await expect(managerB.getStatus("company-a", "connection-a")).resolves.toMatchObject({
+      generation: 3,
+      status: "disconnected",
+    });
   });
 
   it("blocks activation when the cache key is missing", async () => {

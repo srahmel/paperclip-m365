@@ -68,7 +68,7 @@ export class SqlConnectionStore implements ConnectionStore {
       `UPDATE ${this.#connections} SET
         display_name = $3, shareable = $4, expected_tenant_id = $5, tenant_id = $6,
         home_account_id = $7, account_username = $8, status = $9, error_code = $10,
-        created_at = $12::timestamptz, updated_at = $13::timestamptz
+        generation = $11, created_at = $12::timestamptz, updated_at = $13::timestamptz
       WHERE company_id = $2 AND id = $1 AND generation = $14`,
       [...connectionParams(connection), expectedGeneration],
     );
@@ -122,6 +122,7 @@ export class SqlConnectionStore implements ConnectionStore {
           WHERE EXISTS (
             SELECT 1 FROM ${this.#connections}
             WHERE company_id = $1 AND id = $2 AND generation = $3 AND status = 'pending'
+            FOR UPDATE
           )
           ON CONFLICT (company_id, connection_id) DO NOTHING`,
           params,
@@ -134,6 +135,7 @@ export class SqlConnectionStore implements ConnectionStore {
             AND EXISTS (
               SELECT 1 FROM ${this.#connections}
               WHERE company_id = $1 AND id = $2 AND generation = $3 AND status = 'connected'
+              FOR UPDATE
             )`,
           [...params, expectedVersion],
         );

@@ -113,12 +113,65 @@ describe("MsalDeviceCodeProvider", () => {
     await expect(signIn).rejects.toThrow("authentication_shutdown");
     expect(application.deviceRequest?.cancel).toBe(true);
   });
+
+  it("does not report an aborted silent request settled before the provider actually finishes", async () => {
+    const application = new SyntheticMsalApplication();
+    const providerResult = deferred<Awaited<ReturnType<SyntheticMsalApplication["acquireTokenSilent"]>>>();
+    application.silentResult = providerResult.promise;
+    const provider = new MsalDeviceCodeProvider({
+      clientId: "11111111-1111-4111-8111-111111111111",
+      signInScopes: ["User.Read"],
+      createApplication: () => application,
+    });
+    const controller = new AbortController();
+    let settled = false;
+    const token = provider.acquireToken({
+      account: { homeAccountId: account.homeAccountId, tenantId: account.tenantId, username: account.username },
+      scopes: ["Mail.Read"],
+      serializedCache: "cache",
+      signal: controller.signal,
+    }).finally(() => { settled = true; });
+    await application.silentRequestStarted;
+
+    controller.abort(new Error("authentication_shutdown"));
+    const earlyOutcome = await Promise.race([
+      token.then(() => "settled", () => "settled"),
+      new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 10)),
+    ]);
+    expect(earlyOutcome).toBe("pending");
+    expect(settled).toBe(false);
+    providerResult.resolve({ account, ["accessToken"]: "late-token" } as Awaited<ReturnType<import("@azure/msal-node").PublicClientApplication["acquireTokenSilent"]>>);
+    await expect(token).rejects.toThrow("authentication_shutdown");
+  });
+
+  it("does not start silent acquisition when the signal is already aborted", async () => {
+    const application = new SyntheticMsalApplication();
+    const provider = new MsalDeviceCodeProvider({
+      clientId: "11111111-1111-4111-8111-111111111111",
+      signInScopes: ["User.Read"],
+      createApplication: () => application,
+    });
+    const controller = new AbortController();
+    controller.abort(new Error("authentication_shutdown"));
+
+    await expect(provider.acquireToken({
+      account: { homeAccountId: account.homeAccountId, tenantId: account.tenantId, username: account.username },
+      scopes: ["Mail.Read"],
+      serializedCache: "cache",
+      signal: controller.signal,
+    })).rejects.toThrow("authentication_shutdown");
+    expect(application.silentCalls).toBe(0);
+  });
 });
 
 class SyntheticMsalApplication {
   deserialized: string | null = null;
   requestedScopes: string[] = [];
   silentError: Error | null = null;
+  silentResult: Promise<Awaited<ReturnType<import("@azure/msal-node").PublicClientApplication["acquireTokenSilent"]>>> | null = null;
+  silentCalls = 0;
+  readonly silentRequestStarted: Promise<void>;
+  private markSilentRequestStarted!: () => void;
   waitForCancellation = false;
   deviceRequest: Parameters<import("@azure/msal-node").PublicClientApplication["acquireTokenByDeviceCode"]>[0] | null = null;
   readonly deviceRequestStarted: Promise<void>;
@@ -126,6 +179,7 @@ class SyntheticMsalApplication {
 
   constructor() {
     this.deviceRequestStarted = new Promise((resolve) => { this.markDeviceRequestStarted = resolve; });
+    this.silentRequestStarted = new Promise((resolve) => { this.markSilentRequestStarted = resolve; });
   }
 
   getTokenCache() {
@@ -155,11 +209,20 @@ class SyntheticMsalApplication {
   }
 
   async acquireTokenSilent(request: Parameters<import("@azure/msal-node").PublicClientApplication["acquireTokenSilent"]>[0]) {
+    this.silentCalls += 1;
+    this.markSilentRequestStarted();
     this.requestedScopes = [...request.scopes];
     if (this.silentError) throw this.silentError;
+    if (this.silentResult) return this.silentResult;
     return {
       account,
       ["accessToken"]: "synthetic-access-material",
     } as Awaited<ReturnType<import("@azure/msal-node").PublicClientApplication["acquireTokenSilent"]>>;
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((accept) => { resolve = accept; });
+  return { promise, resolve };
 }

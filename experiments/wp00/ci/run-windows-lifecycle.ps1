@@ -130,8 +130,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'disposable PostgreSQL start failed' }
     $postgresStarted = $true
     $env:PAPERCLIP_DATABASE_URL = "postgresql://wp01_probe@127.0.0.1:$postgresPort/postgres"
+    $env:WP00_DATABASE_URL = $env:PAPERCLIP_DATABASE_URL
     $env:PAPERCLIP_LIFECYCLE_RESULT_PATH = $lifecycleEvidence
     $env:PAPERCLIP_LIFECYCLE_PHASE_PATH = $lifecyclePhases
+
+    $phase = 'run-wp02-postgresql'
+    & node --import $importUrls[0] --test --test-reporter=tap --test-timeout=120000 `
+        (Join-Path $Repo 'tests/sql-connection-store.postgres.integration.ts')
+    if ($LASTEXITCODE -ne 0) { throw 'Windows WP02 PostgreSQL integration failed' }
 
     $phase = 'run-host-lifecycle'
     Write-Output "::notice title=Windows lifecycle phase::$phase - starting node with 2 file URL imports"
@@ -162,6 +168,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Windows lifecycle evidence is invalid' }
 } finally {
     Remove-Item Env:PAPERCLIP_DATABASE_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:WP00_DATABASE_URL -ErrorAction SilentlyContinue
     Remove-Item Env:PAPERCLIP_LIFECYCLE_RESULT_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:PAPERCLIP_LIFECYCLE_PHASE_PATH -ErrorAction SilentlyContinue
     if ($postgresStarted) {

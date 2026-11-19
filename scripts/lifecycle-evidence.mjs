@@ -29,7 +29,9 @@ const expectedResultKeys = [
   "check",
   "health",
   "microsoftCalls",
+  "microsoftIntegration",
   "migrationCount",
+  "migrationKeys",
   "namespace",
   "packageSha256VerifiedAt",
   "packageVersion",
@@ -80,7 +82,13 @@ export function assertLifecycleEvidence(lifecycleText, phaseText, expectedRevisi
   assert.deepEqual(result.states, expectedStates, "lifecycle state sequence mismatch");
   assert.equal(result.readOnlySmoke, "scaffold-status", "read-only smoke mismatch");
   assert.equal(result.health, "ready", "final lifecycle health mismatch");
-  assert.equal(result.migrationCount, 1, "migration count mismatch");
+  assert.equal(result.migrationCount, 2, "migration count mismatch");
+  assert.deepEqual(
+    result.migrationKeys,
+    ["001_scaffold_metadata.sql", "002_auth_connections.sql"],
+    "migration keys mismatch",
+  );
+  assert.equal(result.microsoftIntegration, "connection-management", "Microsoft integration mismatch");
   assert.equal(result.namespace, "plugin_m365_8b2a74e8fa", "namespace mismatch");
   assert.equal(result.schemaVersion, 1, "schema version mismatch");
   assert.equal(result.reEnabledPluginIdStable, true, "re-enable changed the plugin ID");

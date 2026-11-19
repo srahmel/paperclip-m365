@@ -174,9 +174,7 @@ export class ConnectionManager {
     const connection = await this.#store.find(companyId, connectionId);
     if (!connection) throw new ConnectionAccessError("connection_not_found");
     await this.#store.disconnect(companyId, connectionId, this.#now().toISOString());
-    const disconnected = await this.#store.find(companyId, connectionId);
-    if (!disconnected) throw new ConnectionAccessError("connection_not_found");
-    connection.generation = disconnected.generation;
+    connection.generation += 1;
     connection.tenantId = null;
     connection.homeAccountId = null;
     connection.accountUsername = null;

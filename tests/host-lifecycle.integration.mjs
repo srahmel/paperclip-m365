@@ -70,10 +70,16 @@ try {
     assert.equal(current.status, expectedStatus);
     assert.equal(current.lastError, null, `${expectedStatus} health contains an error`);
 
-    const migrationRows = await db.select().from(dbModule.pluginMigrations);
-    assert.equal(migrationRows.length, 1, `${expectedStatus} changed the migration ledger`);
-    assert.equal(migrationRows[0]?.migrationKey, "001_scaffold_metadata.sql");
-    assert.equal(migrationRows[0]?.status, "applied");
+    const migrationRows = (await db.select().from(dbModule.pluginMigrations))
+      .toSorted((left, right) => left.migrationKey.localeCompare(right.migrationKey));
+    assert.deepEqual(
+      migrationRows.map(({ migrationKey, status }) => ({ migrationKey, status })),
+      [
+        { migrationKey: "001_scaffold_metadata.sql", status: "applied" },
+        { migrationKey: "002_auth_connections.sql", status: "applied" },
+      ],
+      `${expectedStatus} changed the migration ledger`,
+    );
 
     const namespaceRows = await db.select().from(dbModule.pluginDatabaseNamespaces);
     assert.equal(namespaceRows.length, 1, `${expectedStatus} changed the namespace registration`);
@@ -115,7 +121,7 @@ try {
   assert.deepEqual(await harness.getData("scaffold-status"), {
     status: "ready",
     version: "0.1.0",
-    microsoftIntegration: "not-configured",
+    microsoftIntegration: "connection-management",
   });
 
   const disabled = await lifecycle.disable(installed.id, "WP01 isolated rollback drill");
@@ -158,6 +164,8 @@ try {
     readOnlySmoke: "scaffold-status",
     health: "ready",
     migrationCount: migrationRows.length,
+    migrationKeys: migrationRows.map((row) => row.migrationKey),
+    microsoftIntegration: "connection-management",
     namespace: namespaceRows[0]?.namespaceName,
     schemaVersion: 1,
     reEnabledPluginIdStable: true,
