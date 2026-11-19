@@ -42,6 +42,13 @@ pnpm install --dir "$source" --frozen-lockfile --store-dir "$store" 2>&1 | tee "
 node "$repo/experiments/wp00/install-log-policy.mjs" "$log" "$source/pnpm-lock.yaml"
 node "$repo/experiments/wp00/verify-source.mjs" "$source"
 
+# The real host gateway imports the workspace SDK through its dist exports.
+# Build pinned host dependencies while writable, before the network-free read-only gate.
+node "$source/scripts/ensure-plugin-build-deps.mjs" 2>&1 | tee "$work/host-build-deps.log"
+test -f "$source/packages/shared/dist/index.js"
+test -f "$source/packages/plugins/sdk/dist/index.js"
+node "$repo/experiments/wp00/verify-source.mjs" "$source"
+
 npm pack @paperclipai/plugin-sdk@2026.1106.0 --pack-destination "$tarballs" --ignore-scripts
 npm pack @paperclipai/shared@2026.1106.0 --pack-destination "$tarballs" --ignore-scripts
 npm pack zod@4.6.7 --pack-destination "$tarballs" --ignore-scripts

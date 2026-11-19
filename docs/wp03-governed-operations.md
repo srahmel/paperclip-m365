@@ -17,7 +17,7 @@ not inferred from a string prefix.
 Policies have a persistent revision and an explicit approver list. Approvers also
 need a current active host membership and administration grant. The service
 checks this live at preview, decision, and execution; a missing authorization
-adapter denies approval. Agent tool identity comes exclusively from host run
+adapter denies approval. Execution also rechecks the requesting host agent before reservation and before dispatch; missing, paused, terminated or foreign-company agents fail closed. Agent tool identity comes exclusively from host run
 context. JSON identity fields cannot grant authority. The two WP03 agent tools
 only expose assigned connection status and the requesting agent's operation
 status; neither can approve, execute, or retry a mutation.
@@ -70,12 +70,14 @@ payload is cleared. Active execution payloads are not purged. Job/action/tool wo
 participates in worker drain and shutdown. Database outages fail closed and a
 later scheduled run can resume cleanup, never the external mutation.
 
+The UI clears decrypted previews at their expiry deadline, cancels replaced or unmounted timers, and checks expiry again at decision time. Operation lists fetch metadata only; encrypted snapshots are loaded only for individual preview or execution.
+
 ## Verification and limits
 
 Unit and SDK-harness tests cover authorization, spoofed identities, malformed
 policies, canonical snapshots, live approver revocation, policy/connection changes,
 parallel decisions/executors, pre-dispatch validation, uncertain results,
-retention, and stale UI responses. The PostgreSQL suite uses the pinned host's
+retention, and stale UI responses. Eight PostgreSQL tests use the pinned host's
 actual SQL validators and controlled competing transactions. It checks atomic
 decision/audit persistence, one executor, policy/disconnect ordering, restart
 recovery, expiry and tenant isolation.

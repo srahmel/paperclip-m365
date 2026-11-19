@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { usePluginAction } from "@paperclipai/plugin-sdk/ui";
 import { operationTypes, type ConnectionPolicy } from "../governance/types.js";
-import { buildPolicy, GovernanceRequests, lines, policyRows, type OperationPreview, type PolicyRow, type PublicOperation } from "./governance-model.js";
+import { buildPolicy, GovernanceRequests, lines, policyRows, PreviewExpiry, previewIsCurrent, type OperationPreview, type PolicyRow, type PublicOperation } from "./governance-model.js";
 
 const copy = {
   en: {
@@ -34,6 +34,7 @@ export function GovernancePanel({ companyId, connectionId, locale }: { companyId
   const getPreview = usePluginAction("operation-preview");
   const decide = usePluginAction("operation-decide");
   const [requests] = useState(() => new GovernanceRequests());
+  const [previewExpiry] = useState(() => new PreviewExpiry());
   const [policy, updatePolicy] = useState<ConnectionPolicy | null>(null);
   const [rows, setRows] = useState<PolicyRow[]>([]);
   const [approvers, setApprovers] = useState("");
@@ -45,6 +46,12 @@ export function GovernancePanel({ companyId, connectionId, locale }: { companyId
   const [notice, setNotice] = useState("");
 
   useEffect(() => () => requests.invalidate(), [requests]);
+  useEffect(() => {
+    if (preview) previewExpiry.start(preview.snapshot.expiresAt, () => {
+      setPreview((current) => current === preview ? null : current);
+    });
+    return () => previewExpiry.stop();
+  }, [preview, previewExpiry]);
 
   function acceptPolicy(next: ConnectionPolicy) {
     if (next.companyId !== companyId || next.connectionId !== connectionId) throw new Error("scope_mismatch");
@@ -104,6 +111,7 @@ export function GovernancePanel({ companyId, connectionId, locale }: { companyId
       {operation.state === "approved" ? <p>{t.approved}</p> : null}
       {operation.state === "pending" ? <button type="button" disabled={busy} onClick={() => run(async () => await getPreview({ operationId: operation.id }) as OperationPreview, (next) => {
         if (next.operation.id !== operation.id || next.operation.connectionId !== connectionId || next.snapshot.companyId !== companyId || next.snapshot.connectionId !== connectionId) throw new Error("scope_mismatch");
+        if (!previewIsCurrent(next)) throw new Error("preview_expired");
         setPreview(next);
       })}>{t.preview}</button> : null}
     </article>)}
@@ -112,9 +120,9 @@ export function GovernancePanel({ companyId, connectionId, locale }: { companyId
       <p>{t.approved}</p>
       <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(preview.snapshot, null, 2)}</pre>
       <p style={{ overflowWrap: "anywhere" }}>{t.hash}: {preview.snapshotHash}</p>
-      {preview.operation.state === "pending" ? <>
-        <button type="button" disabled={busy} onClick={() => run(async () => await decide({ operationId: preview.operation.id, snapshotHash: preview.snapshotHash, approve: true }) as PublicOperation, (next) => { setOperations((current) => current?.map((operation) => operation.id === next.id ? next : operation) ?? null); setNotice(t.changed); })}>{t.approve}</button>
-        <button type="button" disabled={busy} onClick={() => run(async () => await decide({ operationId: preview.operation.id, snapshotHash: preview.snapshotHash, approve: false }) as PublicOperation, (next) => { setOperations((current) => current?.map((operation) => operation.id === next.id ? next : operation) ?? null); setNotice(t.changed); })}>{t.reject}</button>
+      {previewIsCurrent(preview) ? <>
+        <button type="button" disabled={busy} onClick={() => run(async () => { if (!previewIsCurrent(preview)) throw new Error("preview_expired"); return await decide({ operationId: preview.operation.id, snapshotHash: preview.snapshotHash, approve: true }) as PublicOperation; }, (next) => { setOperations((current) => current?.map((operation) => operation.id === next.id ? next : operation) ?? null); setNotice(t.changed); })}>{t.approve}</button>
+        <button type="button" disabled={busy} onClick={() => run(async () => { if (!previewIsCurrent(preview)) throw new Error("preview_expired"); return await decide({ operationId: preview.operation.id, snapshotHash: preview.snapshotHash, approve: false }) as PublicOperation; }, (next) => { setOperations((current) => current?.map((operation) => operation.id === next.id ? next : operation) ?? null); setNotice(t.changed); })}>{t.reject}</button>
       </> : null}
       <button type="button" onClick={() => setPreview(null)}>{t.close}</button>
     </section> : null}

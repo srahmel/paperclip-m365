@@ -5,6 +5,34 @@ export type PolicyRow = { agentId: string; operationType: OperationType; resourc
 export type PublicOperation = Pick<OperationRecord, "id" | "connectionId" | "agentId" | "operationType" | "resource" | "state" | "expiresAt" | "decisionUserId" | "decidedAt">;
 export type OperationPreview = { operation: PublicOperation; snapshot: OperationSnapshot; snapshotHash: string };
 
+export function previewIsCurrent(preview: OperationPreview, now = Date.now()): boolean {
+  const deadline = Date.parse(preview.snapshot.expiresAt);
+  return Number.isFinite(deadline) && deadline > now && preview.operation.state === "pending";
+}
+
+export class PreviewExpiry {
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  #generation = 0;
+  stop() {
+    this.#generation += 1;
+    if (this.#timer !== undefined) clearTimeout(this.#timer);
+    this.#timer = undefined;
+  }
+  start(expiresAt: string, expire: () => void) {
+    this.stop();
+    const generation = this.#generation;
+    const deadline = Date.parse(expiresAt);
+    const check = () => {
+      if (generation !== this.#generation) return;
+      this.#timer = undefined;
+      const remaining = deadline - Date.now();
+      if (!Number.isFinite(remaining) || remaining <= 0) { expire(); return; }
+      this.#timer = setTimeout(check, Math.min(remaining, 2_147_483_647));
+    };
+    check();
+  }
+}
+
 export function policyRows(policy: ConnectionPolicy): PolicyRow[] {
   return policy.bindings.flatMap((binding) => binding.rules.map((rule) => ({
     agentId: binding.agentId, operationType: rule.operationType, resources: rule.resources.join("\n"),

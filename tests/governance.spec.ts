@@ -54,10 +54,11 @@ function fixture(executor?: GovernanceExecutor) {
     async purgeExpired(company) { let count = 0; for (const record of operations.values()) if (record.companyId === company && Date.parse(record.expiresAt) <= now.getTime() && record.state !== "executing") { record.envelope = null; if (record.state === "pending") record.state = "expired"; count++; } return count; },
   };
   const resolveKey = vi.fn(async (_companyId: string) => key);
+  const authorizeAgent = vi.fn(async (_company: string, _agent: string) => true);
   const authorizeApprover = vi.fn(async (_company: string, _user: string) => true);
-  const service = new GovernanceService({ store, resolveKey, executor, authorizeApprover, now: () => now, newId: () => `id-${++nextId}` });
+  const service = new GovernanceService({ store, resolveKey, executor, authorizeAgent, authorizeApprover, now: () => now, newId: () => `id-${++nextId}` });
   const approve = async (id: string, snapshotHash: string) => service.decide({ companyId: identity.companyId, operationId: id, userId: "user-a", snapshotHash, approve: true });
-  return { service, store, operations, policy, resolveKey, authorizeApprover, approve, setNow: (value: string) => { now = new Date(value); }, failAudit: () => { auditFails = true; } };
+  return { service, store, operations, policy, resolveKey, authorizeAgent, authorizeApprover, approve, setNow: (value: string) => { now = new Date(value); }, failAudit: () => { auditFails = true; } };
 }
 
 describe("governance canonical JSON", () => {
@@ -235,10 +236,50 @@ describe("GovernanceService", () => {
     expect(executor).toHaveBeenCalledTimes(1);
   });
 
+  it("denies live agent work by default and after host authorization fails", async () => {
+    const f = fixture();
+    const withoutAgent = new GovernanceService({ store: f.store, resolveKey: f.resolveKey, authorizeApprover: f.authorizeApprover });
+    await expect(withoutAgent.prepare(request)).rejects.toThrow("agent_unavailable");
+    await expect(withoutAgent.authorizeRead({ ...request, operationType: "mail-get-message" })).rejects.toThrow("agent_unavailable");
+    const op = await f.service.prepare(request);
+    f.authorizeAgent.mockResolvedValue(false);
+    await expect(f.service.status({ identity, operationId: op.id })).rejects.toThrow("agent_unavailable");
+    await expect(f.service.preview({ companyId: identity.companyId, operationId: op.id, userId: "user-a" })).rejects.toThrow("agent_unavailable");
+    await expect(f.approve(op.id, op.snapshotHash)).rejects.toThrow("agent_unavailable");
+    f.authorizeAgent.mockRejectedValue(new Error("private host detail"));
+    await expect(f.service.authorizeRead({ ...request, operationType: "mail-get-message" })).rejects.toThrow(/^authorization_unavailable$/);
+  });
+
+  it("does not reserve execution after the requesting agent is withdrawn", async () => {
+    const executor = vi.fn(async () => ({ state: "succeeded" as const, result: null }));
+    const f = fixture(executor); const op = await f.service.prepare(request); await f.approve(op.id, op.snapshotHash);
+    const reserve = vi.spyOn(f.store, "reserve");
+    f.authorizeAgent.mockResolvedValue(false);
+    await expect(f.service.execute({ companyId: identity.companyId, operationId: op.id })).rejects.toThrow("agent_unavailable");
+    expect(reserve).not.toHaveBeenCalled(); expect(executor).not.toHaveBeenCalled();
+    expect(f.operations.get(op.id)?.state).toBe("approved");
+  });
+
+  it.each(["after-reserve", "during-key-resolution"])("does not dispatch when agent withdrawal occurs %s", async (timing) => {
+    const executor = vi.fn(async () => ({ state: "succeeded" as const, result: null }));
+    const f = fixture(executor); const op = await f.service.prepare(request); await f.approve(op.id, op.snapshotHash);
+    if (timing === "after-reserve") {
+      const reserve = f.store.reserve.bind(f.store);
+      vi.spyOn(f.store, "reserve").mockImplementation(async (input) => {
+        const result = await reserve(input); f.authorizeAgent.mockResolvedValue(false); return result;
+      });
+    } else {
+      f.resolveKey.mockImplementationOnce(async () => { f.authorizeAgent.mockResolvedValue(false); return key; });
+    }
+    const result = await f.service.execute({ companyId: identity.companyId, operationId: op.id });
+    expect(result.state).toBe("failed"); expect(executor).not.toHaveBeenCalled();
+    expect(f.authorizeAgent).toHaveBeenCalledWith(identity.companyId, identity.agentId);
+  });
+
   it("requires current host authorization and defaults to deny", async () => {
     const executor = vi.fn(async () => ({ state: "succeeded" as const, result: null }));
     const f = fixture(executor); const op = await f.service.prepare(request);
-    const withoutHost = new GovernanceService({ store: f.store, resolveKey: f.resolveKey, now: () => new Date("2026-11-19T12:00:00Z") });
+    const withoutHost = new GovernanceService({ store: f.store, resolveKey: f.resolveKey, authorizeAgent: f.authorizeAgent, now: () => new Date("2026-11-19T12:00:00Z") });
     await expect(withoutHost.preview({ companyId: identity.companyId, operationId: op.id, userId: "user-a" })).rejects.toThrow("approval_forbidden");
     await f.approve(op.id, op.snapshotHash);
     f.authorizeApprover.mockResolvedValue(false);

@@ -57,6 +57,21 @@ $phase = 'verify-host-fingerprint'
     -PaperclipSource $source 2>&1 | Tee-Object -FilePath (Join-Path $evidence 'host-fingerprint.jsonl')
 if ($LASTEXITCODE -ne 0) { throw 'host fingerprint failed' }
 
+$phase = 'build-pinned-host-plugin-dependencies'
+# Use the pinned host's own cross-platform compiler/fingerprint helper. The
+# actual gateway imports the workspace SDK's dist entrypoint, not a test shim.
+& node (Join-Path $source 'scripts/ensure-plugin-build-deps.mjs') 2>&1 |
+    Tee-Object -FilePath (Join-Path $evidence 'host-build-deps.log')
+if ($LASTEXITCODE -ne 0) { throw 'pinned host plugin dependency build failed' }
+foreach ($relative in @('packages/shared/dist/index.js', 'packages/plugins/sdk/dist/index.js')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $source $relative) -PathType Leaf)) {
+        throw "pinned host build output missing: $relative"
+    }
+}
+& pwsh -NoProfile -File (Join-Path $Repo 'experiments/wp00/verify-host-fingerprint.ps1') `
+    -PaperclipSource $source 2>&1 | Tee-Object -FilePath (Join-Path $evidence 'host-fingerprint-after-build.jsonl')
+if ($LASTEXITCODE -ne 0) { throw 'host fingerprint after dependency build failed' }
+
 $phase = 'build-and-verify-plugin'
 Push-Location $Repo
 try {

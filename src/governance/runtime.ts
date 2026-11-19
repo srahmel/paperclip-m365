@@ -25,6 +25,10 @@ export function registerGovernance(input: {
 }) {
   const { ctx, authorizeHuman } = input;
   const service = input.factory?.(ctx) ?? new GovernanceService({ store: new SqlGovernanceStore(ctx.db), resolveKey: input.resolveKey,
+    authorizeAgent: async (companyId, agentId) => {
+      const agent = await ctx.agents.get(agentId, companyId);
+      return !!agent && agent.id === agentId && agent.companyId === companyId && ["idle", "running"].includes(agent.status);
+    },
     authorizeApprover: async (companyId, userId) => {
       const members = await ctx.access.members.list({ companyId });
       return members.some((member) => member.companyId === companyId && member.principalType === "user" &&

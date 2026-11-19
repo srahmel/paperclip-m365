@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { buildPolicy, GovernanceRequests, policyRows } from "../src/ui/governance-model.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildPolicy, GovernanceRequests, policyRows, PreviewExpiry, previewIsCurrent, type OperationPreview } from "../src/ui/governance-model.js";
 import type { ConnectionPolicy } from "../src/governance/types.js";
 
 describe("governance policy form", () => {
@@ -58,5 +58,59 @@ describe("governance request scoping", () => {
     expect(accept).toHaveBeenCalledExactlyOnceWith("new");
     await requests.run(async () => "foreign-company", () => { throw new Error("scope_mismatch"); }, fail, settled);
     expect(fail).toHaveBeenCalledOnce();
+  });
+});
+
+describe("sensitive operation preview lifetime", () => {
+  afterEach(() => { vi.useRealTimers(); });
+  function preview(expiresAt: string): OperationPreview {
+    return {
+      operation: { id: "operation", connectionId: "connection", agentId: "agent", operationType: "mail-send", resource: "folder", state: "pending", expiresAt, decisionUserId: null, decidedAt: null },
+      snapshotHash: "a".repeat(64),
+      snapshot: { schemaVersion: 1, companyId: "company", connectionId: "connection", agentId: "agent", runId: "run", projectId: "project", operationType: "mail-send", resource: "folder", payload: { body: "sensitive synthetic body" }, policyRevision: 1, connectionGeneration: 1, expiresAt, tenantId: "tenant", homeAccountId: "account" },
+    };
+  }
+
+  it("clears the decrypted preview exactly at its deadline without another request", () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-19T12:00:00Z"));
+    let visible: OperationPreview | null = preview("2026-11-19T12:00:02Z");
+    const timer = new PreviewExpiry();
+    timer.start(visible.snapshot.expiresAt, () => { visible = null; });
+    vi.advanceTimersByTime(1_999);
+    expect(visible?.snapshot.payload).toEqual({ body: "sensitive synthetic body" });
+    expect(previewIsCurrent(visible!)).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(visible).toBeNull(); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cancels a replaced deadline and stops expiry callbacks on unmount/company switch", () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-19T12:00:00Z"));
+    const timer = new PreviewExpiry(); const old = vi.fn(); const current = vi.fn();
+    timer.start("2026-11-19T12:00:01Z", old);
+    timer.start("2026-11-19T12:00:03Z", current);
+    vi.advanceTimersByTime(1_000);
+    expect(old).not.toHaveBeenCalled(); expect(current).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+    timer.stop(); vi.advanceTimersByTime(3_000);
+    expect(old).not.toHaveBeenCalled(); expect(current).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["not-a-date", "2026-11-19T11:59:59Z", "2026-11-19T12:00:00Z"])("immediately expires invalid or elapsed deadline %s", (deadline) => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-19T12:00:00Z"));
+    const timer = new PreviewExpiry(); const expire = vi.fn();
+    timer.start(deadline, expire);
+    expect(expire).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+    expect(previewIsCurrent(preview(deadline))).toBe(false);
+  });
+
+  it("rejects decisions after expiry even before a throttled timer callback runs", () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-19T12:00:00Z"));
+    const pending = preview("2026-11-19T12:00:01Z");
+    const expire = vi.fn(); new PreviewExpiry().start(pending.snapshot.expiresAt, expire);
+    vi.setSystemTime(new Date("2026-11-19T12:00:02Z"));
+    expect(expire).not.toHaveBeenCalled();
+    expect(previewIsCurrent(pending)).toBe(false);
+    expect(previewIsCurrent({ ...pending, operation: { ...pending.operation, state: "unknown" } }, Date.parse("2026-11-19T12:00:00Z"))).toBe(false);
+    vi.clearAllTimers();
   });
 });

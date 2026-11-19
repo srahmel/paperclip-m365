@@ -33,8 +33,16 @@ function database(client = sql) {
     },
     async execute(statement: string, params: unknown[] = []) {
       contract.validatePluginRuntimeExecute(statement, namespace);
-      const result = await client.unsafe(statement, params);
-      return { rowCount: Number(result.count ?? 0) };
+      try {
+        const result = await client.unsafe(statement, params);
+        return { rowCount: Number(result.count ?? 0) };
+      } catch (error) {
+        // Synthetic disposable-database diagnostics only; production keeps fixed safe errors.
+        const diagnostic = error as { code?: string; routine?: string; constraint_name?: string };
+        process.stderr.write(`${JSON.stringify({ probe: "governance-sql-failure", sqlState: diagnostic.code ?? "unknown",
+          routine: diagnostic.routine ?? "unknown", constraint: diagnostic.constraint_name ?? null })}\n`);
+        throw error;
+      }
     },
   };
 }
@@ -82,6 +90,11 @@ const reservation = (operation: OperationRecord) => ({ companyId: operation.comp
 
 test("decision and executor CAS each have one winner with atomic actor/time/audit", async () => {
   const op = await fixture();
+  const listed = (await store.listOperations(companyId,100)).find((item) => item.id===op.id);
+  assert(listed);
+  assert.equal(listed.envelope,null,"list projections must not load encrypted payloads");
+  assert.equal(listed.snapshotHash,op.snapshotHash);
+  assert.deepEqual((await store.findOperation(companyId,op.id))?.envelope,envelope,"individual execution/preview loads retain the encrypted snapshot");
   const decisions = await Promise.all([store.decide(decision(op)),store.decide(decision(op))]);
   assert.deepEqual(decisions.sort(), [false,true]);
   const approved = (await store.findOperation(companyId,op.id))!;

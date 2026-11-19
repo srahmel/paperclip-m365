@@ -11,13 +11,15 @@ export class GovernanceService {
   readonly #store: GovernanceStore;
   readonly #resolveKey: KeyResolver;
   readonly #executor?: GovernanceExecutor;
+  readonly #authorizeAgent: (companyId: string, agentId: string) => Promise<boolean>;
   readonly #authorizeApprover: (companyId: string, userId: string) => Promise<boolean>;
   readonly #now: () => Date;
   readonly #newId: () => string;
-  constructor(input: { store: GovernanceStore; resolveKey: KeyResolver; executor?: GovernanceExecutor; authorizeApprover?: (companyId: string, userId: string) => Promise<boolean>; now?: () => Date; newId?: () => string }) {
+  constructor(input: { store: GovernanceStore; resolveKey: KeyResolver; executor?: GovernanceExecutor; authorizeAgent?: (companyId: string, agentId: string) => Promise<boolean>; authorizeApprover?: (companyId: string, userId: string) => Promise<boolean>; now?: () => Date; newId?: () => string }) {
     this.#store = input.store;
     this.#resolveKey = input.resolveKey;
     this.#executor = input.executor;
+    this.#authorizeAgent = input.authorizeAgent ?? (async () => false);
     this.#authorizeApprover = input.authorizeApprover ?? (async () => false);
     this.#now = input.now ?? (() => new Date());
     this.#newId = input.newId ?? randomUUID;
@@ -43,6 +45,7 @@ export class GovernanceService {
   async authorizeRead(input: { identity: AgentIdentity; connectionId: string; operationType: OperationType; resource: string }) {
     requireOperationType(input.operationType, true);
     requireIdentity(input.identity);
+    await this.#currentAgent(input.identity);
     const policy = await this.getPolicy(input.identity.companyId, input.connectionId);
     authorizePolicy(policy, input.identity, input.operationType, input.resource);
     return { authorized: true as const, policyRevision: policy.revision, connectionGeneration: policy.generation };
@@ -53,6 +56,7 @@ export class GovernanceService {
     requireOperationType(input.operationType, false); requireResource(input.resource);
     const ttlMs = input.ttlMs ?? 15 * 60_000;
     if (!Number.isSafeInteger(ttlMs) || ttlMs < 1_000 || ttlMs > 60 * 60_000) throw new GovernanceError("expiry_invalid");
+    await this.#currentAgent(input.identity);
     const policy = await this.getPolicy(input.identity.companyId, input.connectionId);
     authorizePolicy(policy, input.identity, input.operationType, input.resource);
     const now = this.#now();
@@ -118,6 +122,8 @@ export class GovernanceService {
       if (reserved.state !== "executing" || reserved.executorNonce !== executorNonce || reserved.snapshotHash !== record.snapshotHash || !reserved.decisionUserId) throw new GovernanceError("operation_invalidated");
       await this.#currentPolicy(reserved, reserved.decisionUserId);
       snapshot = await this.#snapshot(reserved);
+      // Key resolution may await an external backend; recheck the agent immediately before dispatch.
+      await this.#currentAgent(snapshot);
     } catch {
       // No external call happened. Persist a definite failure; a failed write remains recoverable.
       if (!await this.#storage(() => this.#store.finish({ ...input, executorNonce, state: "failed", result: null, correlationId: this.#newId() }))) throw new GovernanceError("operation_invalidated");
@@ -140,6 +146,7 @@ export class GovernanceService {
     requireIdentity(input.identity);
     const record = await this.#find(input.identity.companyId, input.operationId);
     if (record.agentId !== input.identity.agentId || record.projectId !== input.identity.projectId) throw new GovernanceError("operation_not_found");
+    await this.#currentAgent(input.identity);
     const policy = await this.getPolicy(record.companyId, record.connectionId);
     authorizePolicy(policy, input.identity, record.operationType, record.resource);
     return publicOperation(record);
@@ -175,6 +182,7 @@ export class GovernanceService {
 
   async #currentPolicy(record: OperationRecord, approver: string) {
     if (approver === record.agentId) throw new GovernanceError("approval_forbidden");
+    await this.#currentAgent(record);
     const policy = await this.getPolicy(record.companyId, record.connectionId);
     authorizePolicy(policy, record, record.operationType, record.resource);
     if (policy.revision !== record.policyRevision || policy.generation !== record.connectionGeneration ||
@@ -205,6 +213,14 @@ export class GovernanceService {
       }
       return snapshot;
     } catch { throw new GovernanceError("snapshot_mismatch"); }
+  }
+
+  async #currentAgent(identity: AgentIdentity): Promise<void> {
+    requireIdentity(identity);
+    let authorized: boolean;
+    try { authorized = await this.#authorizeAgent(identity.companyId, identity.agentId); }
+    catch { throw new GovernanceError("authorization_unavailable"); }
+    if (authorized !== true) throw new GovernanceError("agent_unavailable");
   }
 
   async #key(companyId: string) {

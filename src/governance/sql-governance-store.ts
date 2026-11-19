@@ -37,9 +37,9 @@ export class SqlGovernanceStore implements GovernanceStore {
 
   async setPolicy(input: Parameters<GovernanceStore["setPolicy"]>[0]): Promise<boolean> {
     return await this.#execute(`UPDATE ${this.#connections} SET policy_revision=policy_revision+1,
-      policy_bindings=$4::jsonb, policy_approver_user_ids=$5::jsonb, policy_changed_by=$6,policy_changed_at=now()
+      policy_bindings=$4::text::jsonb, policy_approver_user_ids=$5::text::jsonb, policy_changed_by=$6,policy_changed_at=now()
       WHERE company_id=$1 AND id=$2 AND policy_revision=$3
-        AND (shareable=TRUE OR jsonb_array_length($4::jsonb)<=1)`,
+        AND (shareable=TRUE OR jsonb_array_length($4::text::jsonb)<=1)`,
     [input.companyId,input.connectionId,input.expectedRevision,JSON.stringify(input.bindings),JSON.stringify(input.approverUserIds),input.actorId]) === 1;
   }
 
@@ -67,14 +67,14 @@ export class SqlGovernanceStore implements GovernanceStore {
     return await this.#execute(`INSERT INTO ${this.#operations} (
       company_id,id,connection_id,agent_id,run_id,project_id,operation_type,resource,policy_revision,
       connection_generation,snapshot_hash,snapshot_envelope,expires_at,created_at,state,audit,tenant_id,home_account_id)
-      SELECT $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7,$8,$9,$10,$11,$12::jsonb,$13::timestamptz,$14::timestamptz,'pending',
+      SELECT $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7,$8,$9,$10,$11,$12::text::jsonb,$13::timestamptz,$14::timestamptz,'pending',
         jsonb_build_array(jsonb_build_object('state','pending','actorId',$4::text,'at',now(),'correlationId',$2::text)),$17::uuid,$18::text
       FROM ${this.#connections} AS authority
       WHERE authority.company_id=$1 AND authority.id=$3 AND authority.status='connected'
         AND authority.policy_revision=$9 AND authority.generation=$10
         AND authority.tenant_id=$17::uuid AND authority.home_account_id=$18::text
-        AND $13::timestamptz>now() AND $12::jsonb IS NOT NULL
-        AND (authority.policy_bindings @> $15::jsonb OR authority.policy_bindings @> $16::jsonb)
+        AND $13::timestamptz>now() AND $12::text::jsonb IS NOT NULL
+        AND (authority.policy_bindings @> $15::text::jsonb OR authority.policy_bindings @> $16::text::jsonb)
       FOR UPDATE OF authority`, [record.companyId,record.id,record.connectionId,record.agentId,record.runId,record.projectId,
       record.operationType,record.resource,record.policyRevision,record.connectionGeneration,record.snapshotHash,
       JSON.stringify(record.envelope),record.expiresAt,record.createdAt,permission,wildcard,record.tenantId,record.homeAccountId]) === 1;
@@ -86,7 +86,11 @@ export class SqlGovernanceStore implements GovernanceStore {
   }
   async listOperations(companyId: string, limit: number): Promise<OperationRecord[]> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new GovernanceError("operation_limit_invalid");
-    return (await this.#query(`SELECT * FROM ${this.#operations} WHERE company_id=$1 ORDER BY created_at DESC,id LIMIT $2`, [companyId,limit])).map(materialize);
+    return (await this.#query(`SELECT id,company_id,connection_id,agent_id,run_id,project_id,
+      operation_type,resource,policy_revision,connection_generation,tenant_id,home_account_id,
+      snapshot_hash,NULL AS snapshot_envelope,expires_at,created_at,state,decision_user_id,decided_at,
+      executor_nonce,reserved_at,completed_at,result,audit
+      FROM ${this.#operations} WHERE company_id=$1 ORDER BY created_at DESC,id LIMIT $2`, [companyId,limit])).map(materialize);
   }
 
   async decide(input: Parameters<GovernanceStore["decide"]>[0]): Promise<boolean> {
@@ -108,7 +112,7 @@ export class SqlGovernanceStore implements GovernanceStore {
   }
 
   async finish(input: Parameters<GovernanceStore["finish"]>[0]): Promise<boolean> {
-    return await this.#execute(`UPDATE ${this.#operations} SET state=$4,result=$5::jsonb,completed_at=now(),
+    return await this.#execute(`UPDATE ${this.#operations} SET state=$4,result=$5::text::jsonb,completed_at=now(),
       audit=audit || jsonb_build_array(jsonb_build_object('state',$4::text,'actorId','executor','at',now(),'correlationId',$6::text))
       WHERE company_id=$1 AND id=$2 AND state='executing' AND executor_nonce=$3
         AND $4::text IN ('succeeded','failed','unknown')`,

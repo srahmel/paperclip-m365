@@ -6,6 +6,7 @@ import type { GovernanceService } from "../src/governance/governance-service.js"
 import { GovernanceError, type ConnectionPolicy } from "../src/governance/types.js";
 import { createM365Plugin } from "../src/plugin.js";
 import manifest from "../src/manifest.js";
+import { registerGovernance } from "../src/governance/runtime.js";
 
 const companyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const foreignCompanyId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -233,5 +234,39 @@ describe("governance agent tool boundary", () => {
     await Promise.resolve(); expect(drained).toBe(false);
     release({ id: operationId, state: "pending" }); await work; await shutdown;
     expect(registry.idleState()).toBe("none");
+  });
+});
+
+
+describe("production governance agent authorization", () => {
+  it("uses live scoped host lookup and denies missing, foreign, withdrawn and failed lookups", async () => {
+    const harness = createTestHarness({ manifest });
+    const agents = vi.spyOn(harness.ctx.agents, "get");
+    const query = vi.spyOn(harness.ctx.db, "query").mockResolvedValue([{
+      company_id: companyId, id: connectionId, policy_revision: 1, generation: 1, status: "connected", shareable: true,
+      tenant_id: policy.tenantId, home_account_id: policy.homeAccountId,
+      policy_bindings: policy.bindings, policy_approver_user_ids: policy.approverUserIds,
+    }]);
+    const service = registerGovernance({ ctx: harness.ctx, registerAction: harness.ctx.actions.register,
+      resolveKey: async () => { throw new Error("read authorization must not request a key"); },
+      authorizeHuman: async () => ({ companyId, userId }), track: async (operation) => operation(),
+    });
+    const request = { identity, connectionId, operationType: "mail-list-messages" as const, resource: "folder-a" };
+    for (const agent of [null,
+      { id: agentId, companyId: foreignCompanyId, status: "idle" },
+      { id: connectionId, companyId, status: "idle" },
+      ...["paused", "terminated", "pending_approval", "error"].map((status) => ({ id: agentId, companyId, status })),
+    ]) {
+      agents.mockResolvedValue(agent as Agent | null);
+      await expect(service.authorizeRead(request)).rejects.toThrow(/^agent_unavailable$/);
+    }
+    expect(query).not.toHaveBeenCalled();
+    for (const status of ["idle", "running"]) {
+      agents.mockResolvedValue({ id: agentId, companyId, status } as Agent);
+      await expect(service.authorizeRead(request)).resolves.toMatchObject({ authorized: true });
+    }
+    expect(agents).toHaveBeenLastCalledWith(agentId, companyId);
+    agents.mockRejectedValueOnce(new Error("private host backend"));
+    await expect(service.authorizeRead(request)).rejects.toThrow(/^authorization_unavailable$/);
   });
 });
