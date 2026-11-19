@@ -25,6 +25,21 @@ function setup(options: Partial<ConstructorParameters<typeof GraphClient>[0]> = 
 afterEach(() => { for (const client of clients.splice(0)) client.dispose(); vi.useRealTimers(); });
 
 describe("Graph endpoint boundary", () => {
+  it("allows only narrow metadata aliases and fixed Outlook preferences", () => {
+    for (const path of ["/me/mailFolders/drafts", "/me/mailFolders/deleteditems"]) expect(validateRequest({ ...read, operationType: "mail-list-folders", path }).scopes).toEqual(["Mail.Read"]);
+    expect(validateRequest({ ...read, operationType: "calendar-list-calendars", path: "/me/outlook/supportedTimeZones" }).scopes).toEqual(["User.Read"]);
+    expect(validateRequest({ ...read, operationType: "drive-get-item", path: "/me/drive/root" }).scopes).toEqual(["Files.Read"]);
+    expect(validateRequest({ ...read, headers: { Prefer: 'IdType="ImmutableId", outlook.body-content-type="text"' } }).headers.prefer).toContain("ImmutableId");
+    for (const prefer of ['IdType="MutableId"', 'outlook.body-content-type="html"', 'IdType="ImmutableId", arbitrary="value"']) expect(() => validateRequest({ ...read, headers: { Prefer: prefer } })).toThrow();
+    const file: GraphRequest = { ...read, operationType: "drive-create-file", method: "PUT", path: "/me/drive/items/parent:/file%20name.txt:/content", query: { "@microsoft.graph.conflictBehavior": "fail" }, body: new Uint8Array() };
+    expect(validateRequest(file).url).toContain("file%20name.txt");
+    for (const path of ["/me/drive/items/parent%20id:/file.txt:/content", "/me/drive/items/parent:/file%2Fname:/content", "/me/drive/items/parent:/%2E%2E:/content"]) expect(() => validateRequest({ ...file, path })).toThrow();
+  });
+  it("emits an explicit throttling classification without content", async () => {
+    const f = setup(); f.send.mockResolvedValue(response(429, {}, { "retry-after": "61" }));
+    await expect(f.client.request(read)).rejects.toMatchObject({ code: "throttled" });
+    expect(f.emit).toHaveBeenCalledWith(expect.objectContaining({ errorClass: "throttled", statusClass: "4xx", retryAfterSeconds: 61 }));
+  });
   it("covers every declared operation with only its documented method and own-account route", () => {
     const matrix: Array<[GraphRequest["operationType"], GraphRequest["method"], string]> = [
       ["mail-list-folders", "GET", "/me/mailFolders"], ["mail-list-messages", "GET", "/me/mailFolders/f/messages"],

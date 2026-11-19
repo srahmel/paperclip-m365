@@ -13,6 +13,13 @@
     "migrations",
     "docs/runbooks/m365-operations.md",
     "docs/wp04-transport-monitoring.md",
+    "docs/wp05-mail.md",
+    "docs/wp07-calendar.md",
+    "docs/wp08-drive.md",
+    "docs/domain-runtime.md",
+    "docs/wp11-recovery.md",
+    "docs/wp10-agent-boundary.md",
+    "docs/wp09-ui-validation.md",
     "LICENSE",
     "README.md"
   ],
@@ -43,6 +50,7 @@
     "@types/react": "19.2.18",
     "esbuild": "0.28.2",
     "react": "19.2.8",
+    "react-dom": "19.2.8",
     "typescript": "7.0.2",
     "vitest": "5.0.3"
   },

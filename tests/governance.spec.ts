@@ -102,6 +102,31 @@ describe("governance canonical JSON", () => {
 });
 
 describe("GovernanceService", () => {
+  it.each(["revision", "generation", "tenantId", "homeAccountId"] as const)("rejects a changed %s between domain preparation and snapshot persistence", async field => {
+    const f = fixture();
+    const expectedAuthority = { revision: f.policy.revision, generation: f.policy.generation, tenantId: f.policy.tenantId, homeAccountId: f.policy.homeAccountId };
+    if (field === "revision" || field === "generation") f.policy[field]++;
+    else f.policy[field] = "different-account";
+    await expect(f.service.prepare({ ...request, expectedAuthority })).rejects.toThrow("operation_invalidated");
+    expect(f.operations.size).toBe(0); expect(f.resolveKey).not.toHaveBeenCalled();
+  });
+  it.each(["nonce", "state", "policy", "approver", "expiry"])("executor current-authority callback rejects changed %s", async change => {
+    let blocked = false;
+    const f = fixture(async (_snapshot, assertCurrent) => {
+      await assertCurrent();
+      const record = [...f.operations.values()][0]!;
+      if (change === "nonce") record.executorNonce = "other-nonce";
+      if (change === "state") record.state = "unknown";
+      if (change === "policy") f.policy.revision++;
+      if (change === "approver") f.policy.approverUserIds = [];
+      if (change === "expiry") f.setNow("2026-11-19T13:00:00Z");
+      try { await assertCurrent(); } catch { blocked = true; }
+      return { state: "failed", result: null };
+    });
+    const op = await f.service.prepare(request); await f.approve(op.id, op.snapshotHash);
+    await f.service.execute({ companyId: identity.companyId, operationId: op.id }).catch(() => undefined);
+    expect(blocked).toBe(true);
+  });
   it("observes only committed transitions with approval/execution durations and no payload", async () => {
     const observe = vi.fn();
     const f = fixture(async () => { f.setNow("2026-11-19T12:10:05Z"); return { state: "succeeded", result: null }; }, observe);
@@ -275,7 +300,7 @@ describe("GovernanceService", () => {
     await f.approve(prepared.id, prepared.snapshotHash);
     const result = await f.service.execute({ companyId: identity.companyId, operationId: prepared.id });
     expect(result.state).toBe("succeeded");
-    expect(executor).toHaveBeenCalledWith(preview.snapshot);
+    expect(executor).toHaveBeenCalledWith(preview.snapshot, expect.any(Function));
     expect(result.audit.map((entry) => entry.state)).toEqual(["pending", "approved", "executing", "succeeded"]);
     await expect(f.service.execute({ companyId: identity.companyId, operationId: prepared.id })).rejects.toThrow("operation_state_invalid");
     expect(executor).toHaveBeenCalledTimes(1);

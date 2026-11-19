@@ -3,7 +3,7 @@ import { FILE_LIMIT, GraphError, JSON_LIMIT, type GraphRequest } from "./types.j
 
 const id = "[^/?:#]+";
 const routes: Record<OperationType, [GraphRequest["method"], RegExp, string]> = {
-  "mail-list-folders": ["GET", /^\/me\/mailFolders$/, "Mail.Read"],
+  "mail-list-folders": ["GET", new RegExp(`^/me/mailFolders(?:/${id})?$`), "Mail.Read"],
   "mail-list-messages": ["GET", new RegExp(`^/me/mailFolders/${id}/messages$`), "Mail.Read"],
   "mail-get-message": ["GET", new RegExp(`^/me/messages/${id}$`), "Mail.Read"],
   "mail-create-draft": ["POST", /^\/me\/messages$/, "Mail.ReadWrite"],
@@ -11,14 +11,14 @@ const routes: Record<OperationType, [GraphRequest["method"], RegExp, string]> = 
   "mail-create-reply-draft": ["POST", new RegExp(`^/me/messages/${id}/createReply$`), "Mail.ReadWrite"],
   "mail-send": ["POST", /^\/me\/sendMail$/, "Mail.Send"],
   "mail-delete": ["DELETE", new RegExp(`^/me/messages/${id}$`), "Mail.ReadWrite"],
-  "calendar-list-calendars": ["GET", /^\/me\/calendars$/, "Calendars.Read"],
+  "calendar-list-calendars": ["GET", new RegExp(`^/me/(?:calendars(?:/${id})?|outlook/supportedTimeZones)$`), "Calendars.Read"],
   "calendar-list-events": ["GET", new RegExp(`^/me/calendars/${id}/calendarView$`), "Calendars.Read"],
   "calendar-get-event": ["GET", new RegExp(`^/me/calendars/${id}/events/${id}$`), "Calendars.Read"],
   "calendar-create-event": ["POST", new RegExp(`^/me/calendars/${id}/events$`), "Calendars.ReadWrite"],
   "calendar-update-event": ["PATCH", new RegExp(`^/me/calendars/${id}/events/${id}$`), "Calendars.ReadWrite"],
   "calendar-delete-event": ["DELETE", new RegExp(`^/me/calendars/${id}/events/${id}$`), "Calendars.ReadWrite"],
   "drive-list-children": ["GET", new RegExp(`^/me/drive/items/${id}/children$`), "Files.Read"],
-  "drive-get-item": ["GET", new RegExp(`^/me/drive/items/${id}$`), "Files.Read"],
+  "drive-get-item": ["GET", new RegExp(`^/me/drive/(?:items/${id}|root)$`), "Files.Read"],
   "drive-read-content": ["GET", new RegExp(`^/me/drive/items/${id}/content$`), "Files.Read"],
   "drive-create-folder": ["POST", new RegExp(`^/me/drive/items/${id}/children$`), "Files.ReadWrite"],
   "drive-create-file": ["PUT", new RegExp(`^/me/drive/items/${id}:/${id}:/content$`), "Files.ReadWrite"],
@@ -30,10 +30,11 @@ export const GRAPH_ORIGIN = "https://graph.microsoft.com";
 export function validateRequest(request: GraphRequest) {
   const route = routes[request.operationType];
   if (!route || route[0] !== request.method || typeof request.path !== "string" || request.path.length > 4096 || !route[1].test(request.path)) throw new GraphError("endpoint_denied");
-  for (const part of request.path.split("/").slice(1)) {
+  for (const [index, part] of request.path.split("/").slice(1).entries()) {
     let decoded: string;
     try { decoded = decodeURIComponent(part.replace(/:$/, "")); } catch { throw new GraphError("endpoint_denied"); }
-    if (!decoded || decoded === "." || decoded === ".." || /[\x00-\x20\x7f\\/%?#]/.test(decoded)) throw new GraphError("endpoint_denied");
+    const filename = request.operationType === "drive-create-file" && index === 4;
+    if (!decoded || decoded === "." || decoded === ".." || (filename ? /[\x00-\x1f\x7f\\/%?#]/ : /[\x00-\x20\x7f\\/%?#]/).test(decoded)) throw new GraphError("endpoint_denied");
   }
   const binding = request.binding;
   if (!binding || !Number.isSafeInteger(binding.generation) || binding.generation < 1 ||
@@ -56,7 +57,10 @@ export function validateRequest(request: GraphRequest) {
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(request.headers ?? {})) {
     const key = name.toLowerCase();
-    if (typeof value !== "string" || value.length > 512 || /[\r\n\x00]/.test(value) || key !== "if-match" || request.method === "GET" || !/^"[^"\r\n]+"$/.test(value)) throw new GraphError("request_invalid");
+    const fixedMailPrefer = key === "prefer" && request.operationType.startsWith("mail-") &&
+      (value === 'IdType="ImmutableId"' || request.method === "GET" && value === 'IdType="ImmutableId", outlook.body-content-type="text"');
+    const conditional = key === "if-match" && request.method !== "GET" && /^"[^"\r\n]+"$/.test(value);
+    if (typeof value !== "string" || value.length > 512 || /[\r\n\x00]/.test(value) || (!fixedMailPrefer && !conditional)) throw new GraphError("request_invalid");
     if (headers[key]) throw new GraphError("request_invalid");
     headers[key] = value;
   }
@@ -75,7 +79,7 @@ export function validateRequest(request: GraphRequest) {
     if (body.byteLength > JSON_LIMIT) throw new GraphError("size_limit");
     headers["content-type"] = "application/json";
   }
-  return { url: url.href, headers, body, scopes: [route[2]] };
+  return { url: url.href, headers, body, scopes: [request.path === "/me/outlook/supportedTimeZones" ? "User.Read" : route[2]] };
 }
 
 export function validateNextLink(value: unknown, original: string): string {

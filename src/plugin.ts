@@ -19,6 +19,8 @@ import { registerGovernance, type GovernanceFactory } from "./governance/runtime
 import { GovernanceError } from "./governance/types.js";
 import { registerTelemetry } from "./telemetry/runtime.js";
 import type { SignalEvent } from "./telemetry/types.js";
+import { DomainRuntime } from "./domains/runtime.js";
+import { createDomainModules } from "./domains/index.js";
 
 const PUBLIC_ACTION_ERRORS = new Set([
   "authenticated_human_required", "connection_management_forbidden", "authorization_unavailable",
@@ -37,6 +39,7 @@ export function createM365Plugin(
   governanceFactory?: GovernanceFactory,
 ) {
   let runtimeContext: PluginContext | undefined;
+  let domainRuntime: DomainRuntime | undefined;
   const resolveManager = managerFactory ?? ((ctx, companyId) =>
     createRuntimeManager(ctx, companyId, authenticationSessions));
   return definePlugin({
@@ -82,12 +85,16 @@ export function createM365Plugin(
         authorizeHuman: (context) => requireConnectionManager(ctx, context),
         track: (operation) => authenticationSessions.track(operation),
       });
-      registerGovernance({
+      let governance: ReturnType<typeof registerGovernance>;
+      domainRuntime = new DomainRuntime({ ctx, service: () => governance, modules: createDomainModules(),
+        manager: companyId => resolveManager(ctx, companyId), track: work => authenticationSessions.track(work), observe });
+      governance = registerGovernance({
         ctx, registerAction,
         observe,
         authorizeHuman: (context) => requireConnectionManager(ctx, context),
         track: (operation) => authenticationSessions.track(operation),
         factory: governanceFactory,
+        executor: domainRuntime.execute,
         resolveKey: async (companyId) => {
           const config = await ctx.config.get(companyId);
           const reference = requireSecretRef(config.cacheEncryptionKey);
@@ -95,6 +102,7 @@ export function createM365Plugin(
             version: JSON.stringify(reference.version ?? "latest") };
         },
       });
+      domainRuntime.register();
       registerAction("company-readiness", async (_params, actionContext) => {
         const { companyId } = await requireConnectionManager(ctx, actionContext);
         return companyReadiness(ctx, companyId);
@@ -203,6 +211,8 @@ export function createM365Plugin(
     },
 
     async onShutdown() {
+      const drained = domainRuntime?.dispose();
+      if (drained?.pendingOperations) runtimeContext?.logger.warn("domain_host_calls_pending_shutdown");
       await authenticationSessions.shutdown();
     },
   });

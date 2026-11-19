@@ -3,7 +3,7 @@ name: WP01 plugin package
 on:
   workflow_dispatch:
   push:
-    branches: [hum-323-wp01-scaffold, hum-344-wp02-auth-connections, codex/m365-wp03-governed-operations, codex/m365-wp04-graph-telemetry]
+    branches: [hum-323-wp01-scaffold, hum-344-wp02-auth-connections, codex/m365-wp03-governed-operations, codex/m365-wp04-graph-telemetry, codex/m365-domain-tools]
   pull_request:
 
 permissions:

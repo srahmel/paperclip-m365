@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePluginAction } from "@paperclipai/plugin-sdk/ui";
 import { operationTypes, type ConnectionPolicy } from "../governance/types.js";
 import { buildPolicy, GovernanceRequests, lines, policyRows, PreviewExpiry, previewIsCurrent, type OperationPreview, type PolicyRow, type PublicOperation } from "./governance-model.js";
+
+import { OperationPreviewContent } from "./operation-preview.js";
+import { buildOperationPreview, canExecute, scopedOperation, type PreviewModel } from "./operation-preview-model.js";
 
 const copy = {
   en: {
@@ -11,8 +14,8 @@ const copy = {
     error: "The action could not be completed. Reload the current state before trying again.", saved: "Permissions saved.", revision: "Revision", emptyPolicy: "No agent permissions. Agents cannot use this connection.",
     requests: "Operation requests", refresh: "Refresh requests", bounded: "Shows up to 100 recent requests for this company, filtered to this connection.", empty: "No requests shown for this connection.",
     preview: "Review exact operation", approve: "Approve this exact operation", reject: "Reject this exact operation", close: "Close preview", expires: "Expires", state: "Status", decision: "Decision by", decided: "Decision time",
-    approved: "Approval authorizes the reviewed operation; it does not mean it has executed. Execution is not available in this panel.", unknown: "Outcome unknown. Check the target service and audit evidence. Do not retry this operation.",
-    snapshot: "Exact operation content", hash: "Snapshot fingerprint", busy: "Working…", changed: "Decision recorded. Refresh requests to see current status.", resource: "Resource", loadingPolicy: "Load permissions before editing.",
+    approved: "Approval authorizes the reviewed operation; it does not mean it has executed. Execute it separately after approval.", unknown: "Outcome unknown. Check the target service and audit evidence. Do not retry this operation.",
+    snapshot: "Exact operation content", hash: "Snapshot fingerprint", busy: "Working…", changed: "Request updated. Refresh requests to see current status.", resource: "Resource", loadingPolicy: "Load permissions before editing.",
   },
   de: {
     title: "Berechtigungen und Freigaben", policy: "Verbindungsberechtigungen", load: "Berechtigungen laden", save: "Berechtigungen speichern", add: "Berechtigung hinzufügen", remove: "Berechtigung entfernen",
@@ -21,12 +24,15 @@ const copy = {
     error: "Die Aktion konnte nicht abgeschlossen werden. Lade den aktuellen Stand vor einem erneuten Versuch.", saved: "Berechtigungen gespeichert.", revision: "Revision", emptyPolicy: "Keine Agentenberechtigungen. Agenten können diese Verbindung nicht verwenden.",
     requests: "Aktionsanfragen", refresh: "Anfragen aktualisieren", bounded: "Zeigt bis zu 100 aktuelle Anfragen des Unternehmens, gefiltert auf diese Verbindung.", empty: "Keine Anfragen für diese Verbindung angezeigt.",
     preview: "Konkrete Aktion prüfen", approve: "Genau diese Aktion freigeben", reject: "Genau diese Aktion ablehnen", close: "Vorschau schließen", expires: "Gültig bis", state: "Status", decision: "Entschieden von", decided: "Entscheidungszeit",
-    approved: "Die Freigabe erlaubt die geprüfte Aktion; sie bestätigt keine Ausführung. In diesem Bereich ist keine Ausführung verfügbar.", unknown: "Ergebnis unbekannt. Prüfe den Zieldienst und die Prüfprotokolle. Diese Aktion nicht erneut ausführen.",
-    snapshot: "Konkreter Aktionsinhalt", hash: "Prüfsumme der Vorschau", busy: "Wird bearbeitet…", changed: "Entscheidung gespeichert. Aktualisiere die Anfragen für den aktuellen Status.", resource: "Ressource", loadingPolicy: "Lade die Berechtigungen vor dem Bearbeiten.",
+    approved: "Die Freigabe erlaubt die geprüfte Aktion; sie bestätigt keine Ausführung. Führe sie nach der Freigabe separat aus.", unknown: "Ergebnis unbekannt. Prüfe den Zieldienst und die Prüfprotokolle. Diese Aktion nicht erneut ausführen.",
+    snapshot: "Konkreter Aktionsinhalt", hash: "Prüfsumme der Vorschau", busy: "Wird bearbeitet…", changed: "Anfrage aktualisiert. Aktualisiere die Anfragen für den aktuellen Status.", resource: "Ressource", loadingPolicy: "Lade die Berechtigungen vor dem Bearbeiten.",
   },
 };
 
-export function GovernancePanel({ companyId, connectionId, locale }: { companyId: string; connectionId: string; locale: string }) {
+export function GovernancePanel(props: { companyId: string; connectionId: string; locale: string }) {
+  return <ScopedGovernancePanel key={`${props.companyId}:${props.connectionId}`} {...props} />;
+}
+function ScopedGovernancePanel({ companyId, connectionId, locale }: { companyId: string; connectionId: string; locale: string }) {
   const t = copy[locale.toLowerCase().startsWith("de") ? "de" : "en"];
   const getPolicy = usePluginAction("policy-get");
   const setPolicy = usePluginAction("policy-set");
@@ -34,6 +40,9 @@ export function GovernancePanel({ companyId, connectionId, locale }: { companyId
   const getPreview = usePluginAction("operation-preview");
   const decide = usePluginAction("operation-decide");
   const invalidate = usePluginAction("operation-invalidate");
+  const execute = usePluginAction("operation-execute");
+  const busyRef = useRef(false);
+  const [previewModel, setPreviewModel] = useState<PreviewModel | null>(null);
   const [requests] = useState(() => new GovernanceRequests());
   const [previewExpiry] = useState(() => new PreviewExpiry());
   const [policy, updatePolicy] = useState<ConnectionPolicy | null>(null);
@@ -60,11 +69,13 @@ export function GovernancePanel({ companyId, connectionId, locale }: { companyId
   }
 
   function run<T>(action: () => Promise<T>, accept: (value: T) => void) {
-    setBusy(true); setError(false); setNotice(""); setPreview(null);
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true); setError(false); setNotice(""); setPreview(null); setPreviewModel(null);
     void requests.run(action, accept, () => {
       // A permissions failure must not leave the previous sensitive preview or policy visible.
       setPreview(null); setOperations(null); updatePolicy(null); setRows([]); setApprovers(""); setAcknowledged(false); setError(true);
-    }, () => setBusy(false));
+    }, () => { busyRef.current = false; setBusy(false); });
   }
 
   function changeRow(index: number, patch: Partial<PolicyRow>) {
@@ -103,31 +114,47 @@ export function GovernancePanel({ companyId, connectionId, locale }: { companyId
     </fieldset>
     <h4>{t.requests}</h4>
     <p>{t.bounded}</p>
-    <button type="button" disabled={busy} onClick={() => run(async () => await listOperations({}) as PublicOperation[], (next) => setOperations(next.slice(0, 100).filter((operation) => operation.connectionId === connectionId)))}>{t.refresh}</button>
+    <button type="button" disabled={busy} onClick={() => run(async () => await listOperations({}) as PublicOperation[], (next) => {
+      if (!Array.isArray(next) || next.some((item) => (item as unknown as { companyId: string }).companyId !== companyId)) throw new Error("scope_mismatch");
+      setOperations(next.slice(0, 100).filter((operation) => operation.connectionId === connectionId).map((item) => scopedOperation(item, companyId, connectionId)));
+    })}>{t.refresh}</button>
     {operations?.length === 0 ? <p>{t.empty}</p> : null}
     {operations?.map((operation) => <article key={operation.id} style={{ border: "1px solid currentColor", padding: "0.75rem", overflowWrap: "anywhere" }}>
       <dl><dt>ID</dt><dd>{operation.id}</dd><dt>{t.agent}</dt><dd>{operation.agentId}</dd><dt>{t.type}</dt><dd>{operation.operationType}</dd><dt>{t.resource}</dt><dd>{operation.resource}</dd><dt>{t.state}</dt><dd>{operation.state}</dd><dt>{t.expires}</dt><dd>{operation.expiresAt}</dd>
         {operation.decisionUserId ? <><dt>{t.decision}</dt><dd>{operation.decisionUserId}</dd><dt>{t.decided}</dt><dd>{operation.decidedAt}</dd></> : null}</dl>
       {operation.state === "unknown" ? <p role="alert">{t.unknown}</p> : null}
       {operation.state === "approved" ? <p>{t.approved}</p> : null}
+      {operation.state === "succeeded" ? <p>{locale.toLowerCase().startsWith("de") ? "Ausführung bestätigt. Bei Versand bedeutet Annahme durch den Dienst keine bestätigte Zustellung." : "Execution confirmed. For sending, service acceptance does not confirm delivery."}</p> : null}
+      {canExecute(operation) ? <button type="button" disabled={busy} onClick={() => run(async () => {
+        if (!canExecute(operation)) throw new Error("execution_expired");
+        return await execute({ operationId: operation.id }) as PublicOperation;
+      }, (next) => {
+        scopedOperation(next, companyId, connectionId, operation.id);
+        setOperations((current) => current?.map((item) => item.id === next.id ? next : item) ?? null); setNotice(t.changed);
+      })}>{locale.toLowerCase().startsWith("de") ? "Freigegebene Aktion jetzt ausführen" : "Execute approved operation now"}</button> : null}
       {["pending", "approved"].includes(operation.state) ? <button type="button" disabled={busy} onClick={() => run(async () => await invalidate({ operationId: operation.id }) as PublicOperation, (next) => {
-        if (next.id !== operation.id || next.connectionId !== connectionId) throw new Error("scope_mismatch");
+        scopedOperation(next, companyId, connectionId, operation.id);
         setOperations((current) => current?.map((item) => item.id === next.id ? next : item) ?? null); setNotice(t.changed);
       })}>{locale.toLowerCase().startsWith("de") ? "Anfrage dauerhaft ungültig machen" : "Permanently invalidate request"}</button> : null}
-      {operation.state === "pending" ? <button type="button" disabled={busy} onClick={() => run(async () => await getPreview({ operationId: operation.id }) as OperationPreview, (next) => {
+      {operation.state === "pending" ? <button type="button" disabled={busy} onClick={() => run(async () => {
+        const next = await getPreview({ operationId: operation.id }) as OperationPreview;
+        scopedOperation(next.operation, companyId, connectionId, operation.id);
+        if (next.snapshot.companyId !== companyId || next.snapshot.connectionId !== connectionId) throw new Error("scope_mismatch");
+        return { next, model: await buildOperationPreview(next) };
+      }, ({ next, model }) => {
         if (next.operation.id !== operation.id || next.operation.connectionId !== connectionId || next.snapshot.companyId !== companyId || next.snapshot.connectionId !== connectionId) throw new Error("scope_mismatch");
         if (!previewIsCurrent(next)) throw new Error("preview_expired");
-        setPreview(next);
+        setPreview(next); setPreviewModel(model);
       })}>{t.preview}</button> : null}
     </article>)}
     {preview ? <section aria-label={t.snapshot}>
       <h4>{t.snapshot}</h4>
       <p>{t.approved}</p>
-      <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(preview.snapshot, null, 2)}</pre>
+      {previewModel ? <OperationPreviewContent model={previewModel} locale={locale} /> : null}
       <p style={{ overflowWrap: "anywhere" }}>{t.hash}: {preview.snapshotHash}</p>
       {previewIsCurrent(preview) ? <>
-        <button type="button" disabled={busy} onClick={() => run(async () => { if (!previewIsCurrent(preview)) throw new Error("preview_expired"); return await decide({ operationId: preview.operation.id, snapshotHash: preview.snapshotHash, approve: true }) as PublicOperation; }, (next) => { setOperations((current) => current?.map((operation) => operation.id === next.id ? next : operation) ?? null); setNotice(t.changed); })}>{t.approve}</button>
-        <button type="button" disabled={busy} onClick={() => run(async () => { if (!previewIsCurrent(preview)) throw new Error("preview_expired"); return await decide({ operationId: preview.operation.id, snapshotHash: preview.snapshotHash, approve: false }) as PublicOperation; }, (next) => { setOperations((current) => current?.map((operation) => operation.id === next.id ? next : operation) ?? null); setNotice(t.changed); })}>{t.reject}</button>
+        <button type="button" disabled={busy || !previewModel?.approvable} onClick={() => run(async () => { if (!previewIsCurrent(preview) || !previewModel?.approvable) throw new Error("preview_expired"); return await decide({ operationId: preview.operation.id, snapshotHash: preview.snapshotHash, approve: true }) as PublicOperation; }, (next) => { scopedOperation(next, companyId, connectionId, preview.operation.id); setOperations((current) => current?.map((operation) => operation.id === next.id ? next : operation) ?? null); setNotice(t.changed); })}>{t.approve}</button>
+        <button type="button" disabled={busy} onClick={() => run(async () => { if (!previewIsCurrent(preview)) throw new Error("preview_expired"); return await decide({ operationId: preview.operation.id, snapshotHash: preview.snapshotHash, approve: false }) as PublicOperation; }, (next) => { scopedOperation(next, companyId, connectionId, preview.operation.id); setOperations((current) => current?.map((operation) => operation.id === next.id ? next : operation) ?? null); setNotice(t.changed); })}>{t.reject}</button>
       </> : null}
       <button type="button" onClick={() => setPreview(null)}>{t.close}</button>
     </section> : null}

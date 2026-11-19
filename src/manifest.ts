@@ -1,5 +1,6 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 import { governanceTools } from "./governance/tool-declarations.js";
+import { domainTools } from "./domains/index.js";
 
 const manifest: PaperclipPluginManifestV1 = {
   id: "srahmel.m365",
@@ -27,7 +28,7 @@ const manifest: PaperclipPluginManifestV1 = {
     "plugin.state.read",
     "plugin.state.write",
   ],
-  tools: governanceTools,
+  tools: [...governanceTools, ...domainTools],
   jobs: [{ jobKey: "operation-retention", displayName: "M365 operation retention",
     description: "Clear expired encrypted requests and quarantine stale execution reservations without retrying them.", schedule: "*/5 * * * *" },
     { jobKey: "telemetry-evaluate", displayName: "M365 operational monitoring", description: "Evaluate content-free operational signals and the durable alarm outbox.", schedule: "* * * * *" }],

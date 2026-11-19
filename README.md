@@ -38,16 +38,17 @@ only; secrets belong in the Paperclip Secret Store.
 
 ## Planned capabilities
 
-WP04 adds the internal Graph transport, content-free monitoring, private-result
-retention and independent watchdog foundations. The remaining work packages add
-mail, calendar and OneDrive domain operations; no production Graph mutation
-handler is enabled yet.
+WP04 provides the Graph transport, content-free monitoring, private-result
+retention and independent watchdog foundations. Domain tools now connect mail,
+calendar and OneDrive operations to live agent permissions and immutable human
+approvals. Integration evidence is synthetic; no Microsoft tenant or production
+installation has been exercised.
 
-| Area | Planned first-version scope |
+| Area | Implemented development scope |
 | --- | --- |
 | Mail | Read folders/messages, create and edit drafts, send, reply drafts, delete |
 | Calendar | Read calendars/events and create, edit, delete simple events |
-| OneDrive | List folders, read/download files, create, replace, rename, delete |
+| OneDrive | List/read/download, create folders/files, rename, recycle files; content replacement and folder deletion fail closed |
 | Access | Explicit agent assignments for private and shared connections |
 | Approval | Permission-checked reads; concrete human approval before mutations |
 
@@ -62,6 +63,10 @@ handler is enabled yet.
 - [Scaffold and installation evidence](docs/wp01-scaffold.md)
 - [Transport, monitoring and retention](docs/wp04-transport-monitoring.md)
 - [Operations runbook v1](docs/runbooks/m365-operations.md)
+- [Domain authority and configuration](docs/domain-runtime.md)
+- [Mail operations and limits](docs/wp05-mail.md)
+- [Calendar operations and limits](docs/wp07-calendar.md)
+- [OneDrive operations and limits](docs/wp08-drive.md)
 
 The package includes `dist/watchdog.js` for an independent supervisor. Import
 `PluginWatchdog` and invoke `checkOnce()` from an external scheduler with an

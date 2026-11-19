@@ -1,5 +1,5 @@
 import type { PluginContext, PluginPerformActionContext, ToolRunContext } from "@paperclipai/plugin-sdk";
-import { GovernanceService, governanceFailureSignal, type GovernanceObserver } from "./governance-service.js";
+import { GovernanceService, governanceFailureSignal, type GovernanceObserver, type GovernanceExecutor } from "./governance-service.js";
 import { SqlGovernanceStore } from "./sql-governance-store.js";
 import { GovernanceError, type AgentBinding, type AgentIdentity, type KeyResolver } from "./types.js";
 
@@ -24,13 +24,14 @@ export function registerGovernance(input: {
   authorizeHuman: (context: PluginPerformActionContext) => Promise<{ companyId: string; userId: string }>;
   track: <T>(operation: () => Promise<T>) => Promise<T>; factory?: GovernanceFactory;
   observe?: GovernanceObserver;
+  executor?: GovernanceExecutor;
 }) {
   const { ctx } = input;
   const authorizeHuman = async (context: PluginPerformActionContext) => {
     try { return await input.authorizeHuman(context); }
     catch { throw new GovernanceError("approval_forbidden"); }
   };
-  const service = input.factory?.(ctx) ?? new GovernanceService({ store: new SqlGovernanceStore(ctx.db), resolveKey: input.resolveKey, observe: input.observe,
+  const service = input.factory?.(ctx) ?? new GovernanceService({ store: new SqlGovernanceStore(ctx.db), resolveKey: input.resolveKey, observe: input.observe, executor: input.executor,
     authorizeAgent: async (companyId, agentId) => {
       const agent = await ctx.agents.get(agentId, companyId);
       return !!agent && agent.id === agentId && agent.companyId === companyId && ["idle", "running"].includes(agent.status);
@@ -156,7 +157,7 @@ export function registerGovernance(input: {
   return service;
 }
 
-async function agentIdentity(ctx: PluginContext, context: ToolRunContext): Promise<AgentIdentity> {
+export async function agentIdentity(ctx: PluginContext, context: ToolRunContext): Promise<AgentIdentity> {
   const identity = { companyId: uuid(context.companyId), agentId: uuid(context.agentId), runId: uuid(context.runId), projectId: uuid(context.projectId) };
   const agent = await ctx.agents.get(identity.agentId, identity.companyId);
   if (!agent || agent.companyId !== identity.companyId || !["idle", "running"].includes(agent.status)) throw new GovernanceError("agent_unavailable");

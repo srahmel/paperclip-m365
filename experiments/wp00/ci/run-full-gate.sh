@@ -70,6 +70,13 @@ node "$source/$runner" --test --test-reporter=tap --test-timeout=120000 "$repo/t
 assert_tap_counts 11 "$scratch/wp03-postgresql.tap"
 node "$source/$runner" --test --test-reporter=tap --test-timeout=120000 "$repo/tests/telemetry.postgres.integration.ts" | tee "$scratch/wp04-postgresql.tap"
 assert_tap_counts 6 "$scratch/wp04-postgresql.tap"
+export WP01_PACKAGE_PATH=$plugin_artifact
+export WP01_PACKAGE_MANIFEST=$plugin_manifest
+export WP11_PG_DUMP=/usr/lib/postgresql/17/bin/pg_dump
+export WP11_PG_RESTORE=/usr/lib/postgresql/17/bin/pg_restore
+export WP11_BACKUP_PATH=$scratch/wp11-schema.backup
+node "$source/$runner" --test --test-reporter=tap --test-timeout=120000 "$repo/tests/recovery.postgres.integration.ts" | tee "$scratch/wp11-postgresql.tap"
+assert_tap_counts 5 "$scratch/wp11-postgresql.tap"
 node "$source/node_modules/typescript/bin/tsc" --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext \
   --types node --typeRoots "$source/packages/plugins/sdk/node_modules/@types" --skipLibCheck \
   "$repo/experiments/wp00/operation-contract.ts" "$repo/experiments/wp00/operation-contract.test.ts"
@@ -94,6 +101,13 @@ node --import "$tsx_loader" --import "$repo/scripts/register-registry-sdk-pin.mj
 grep -q '"check":"isolated-host-lifecycle"' "$scratch/plugin-lifecycle.log" || fail "plugin lifecycle evidence is missing"
 dropdb -h 127.0.0.1 -U postgres paperclip_m365_wp01
 
+export PAPERCLIP_AGENT_GATEWAY_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/paperclip_m365_agent_gateway
+createdb -h 127.0.0.1 -U postgres paperclip_m365_agent_gateway
+node --import "$tsx_loader" --import "$repo/scripts/register-registry-sdk-pin.mjs" \
+  "$repo/tests/host-agent-gateway.integration.mjs" | tee "$scratch/agent-gateway.log"
+grep -q '"check":"isolated-authenticated-agent-gateway"' "$scratch/agent-gateway.log" || fail "authenticated agent gateway evidence is missing"
+dropdb -h 127.0.0.1 -U postgres paperclip_m365_agent_gateway
+
 pg_ctl -D "$pgdata" -m fast -w stop >/dev/null
 trap - EXIT HUP INT TERM
-printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","wp02PostgresAssertions":"6/6","wp03PostgresAssertions":"11/11","wp04PostgresAssertions":"6/6","sdkAssertions":"28/28","pluginLifecycle":"install-ready-disable-reenable-ready-disable-soft-uninstall-restore-ready","packageDigestVerifiedAt":["install","restore"],"gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'
+printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","wp02PostgresAssertions":"6/6","wp03PostgresAssertions":"11/11","wp04PostgresAssertions":"6/6","wp11PostgresAssertions":"5/5","sdkAssertions":"28/28","pluginLifecycle":"install-ready-disable-reenable-ready-disable-soft-uninstall-restore-ready","packageDigestVerifiedAt":["install","restore"],"gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'

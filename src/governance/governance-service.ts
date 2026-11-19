@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Component, SignalEvent } from "../telemetry/types.js";
+import type { ConnectionPolicy } from "./types.js";
 import { ConnectionAccessError, MicrosoftAuthError, decryptCache, encryptCache } from "../auth/connection-manager.js";
 import { authorizePolicy, canonicalJson, immutableJson, MAX_RESULT_BYTES, publicResult, privateResult, requireId, requireIdentity, requireOperationType, requireResource, validatePolicy } from "./policy.js";
 import { GovernanceError, type AgentBinding, type AgentIdentity, type GovernanceStore, type Json, type KeyResolver, type OperationRecord, type FullOperationRecord, type PublicResultSummary, type PrivateOperationResult, type OperationSnapshot, type OperationType } from "./types.js";
 
-export type GovernanceExecutor = (snapshot: Readonly<OperationSnapshot>) => Promise<{ state: "succeeded" | "failed" | "unknown"; result: PublicResultSummary | null; privateResult?: PrivateOperationResult | null }>;
+export type GovernanceExecutor = (snapshot: Readonly<OperationSnapshot>, assertCurrent: () => Promise<void>) => Promise<{ state: "succeeded" | "failed" | "unknown"; result: PublicResultSummary | null; privateResult?: PrivateOperationResult | null }>;
 export type GovernanceObserver = (companyId: string, event: SignalEvent) => Promise<void>;
 /** Fixed codes only: never inspect or forward exception text/provider responses. */
 export function governanceFailureSignal(error: unknown, component: Component): SignalEvent | null {
@@ -72,13 +73,16 @@ export class GovernanceService {
     return { authorized: true as const, policyRevision: policy.revision, connectionGeneration: policy.generation };
   }
 
-  async prepare(input: { identity: AgentIdentity; connectionId: string; operationType: OperationType; resource: string; payload: Json; ttlMs?: number }): Promise<PublicOperation> {
+  async prepare(input: { identity: AgentIdentity; connectionId: string; operationType: OperationType; resource: string; payload: Json; ttlMs?: number;
+    expectedAuthority?: Pick<ConnectionPolicy, "revision" | "generation" | "tenantId" | "homeAccountId"> }): Promise<PublicOperation> {
     requireIdentity(input.identity); requireId(input.connectionId);
     requireOperationType(input.operationType, false); requireResource(input.resource);
     const ttlMs = input.ttlMs ?? 15 * 60_000;
     if (!Number.isSafeInteger(ttlMs) || ttlMs < 1_000 || ttlMs > 60 * 60_000) throw new GovernanceError("expiry_invalid");
     await this.#currentAgent(input.identity);
     const policy = await this.getPolicy(input.identity.companyId, input.connectionId);
+    if (input.expectedAuthority && (policy.revision !== input.expectedAuthority.revision || policy.generation !== input.expectedAuthority.generation ||
+        policy.tenantId !== input.expectedAuthority.tenantId || policy.homeAccountId !== input.expectedAuthority.homeAccountId)) throw new GovernanceError("operation_invalidated");
     authorizePolicy(policy, input.identity, input.operationType, input.resource);
     const now = this.#now();
     const snapshot: OperationSnapshot = immutableJson({
@@ -158,7 +162,12 @@ export class GovernanceService {
       return publicOperation(await this.#find(input.companyId, input.operationId));
     }
     try {
-      const outcome = await this.#executor(snapshot);
+      const assertCurrent = async () => {
+        const live = await this.#find(input.companyId, input.operationId);
+        if (live.state !== "executing" || live.executorNonce !== executorNonce || live.snapshotHash !== record.snapshotHash || !live.decisionUserId) throw new GovernanceError("operation_invalidated");
+        await this.#currentPolicy(live, live.decisionUserId);
+      };
+      const outcome = await this.#executor(snapshot, assertCurrent);
       if (!["succeeded", "failed", "unknown"].includes(outcome.state)) throw new Error("invalid outcome");
       result = publicResult(outcome.result, outcome.state);
       const privateData = privateResult(outcome.privateResult);

@@ -177,6 +177,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Windows WP04 PostgreSQL integration failed' }
     Assert-TapCounts (Join-Path $evidence 'wp04-postgresql.tap') 6
 
+    $phase = 'run-wp11-postgresql'
+    $env:WP01_PACKAGE_PATH = $artifact
+    $env:WP11_PG_DUMP = Join-Path $postgresBin 'pg_dump.exe'
+    $env:WP11_PG_RESTORE = Join-Path $postgresBin 'pg_restore.exe'
+    $env:WP11_BACKUP_PATH = Join-Path $Work 'wp11-schema.backup'
+    & node --import $importUrls[0] --test --test-reporter=tap --test-timeout=120000 `
+        (Join-Path $Repo 'tests/recovery.postgres.integration.ts') 2>&1 |
+        Tee-Object -FilePath (Join-Path $evidence 'wp11-postgresql.tap')
+    if ($LASTEXITCODE -ne 0) { throw 'Windows WP11 recovery integration failed' }
+    Assert-TapCounts (Join-Path $evidence 'wp11-postgresql.tap') 5
+
     $phase = 'run-host-lifecycle'
     Write-Output "::notice title=Windows lifecycle phase::$phase - starting node with 2 file URL imports"
     & node --import $importUrls[0] --import $importUrls[1] `
@@ -204,9 +215,26 @@ try {
     & node (Join-Path $Repo 'scripts/lifecycle-evidence.mjs') `
         $lifecycleEvidence $lifecyclePhases $SourceRevision
     if ($LASTEXITCODE -ne 0) { throw 'Windows lifecycle evidence is invalid' }
+
+    $phase = 'run-authenticated-agent-gateway'
+    $env:PAPERCLIP_AGENT_GATEWAY_DATABASE_URL = "postgresql://wp01_probe@127.0.0.1:$postgresPort/paperclip_m365_agent_gateway"
+    & (Join-Path $postgresBin 'createdb.exe') -h 127.0.0.1 -p $postgresPort -U wp01_probe paperclip_m365_agent_gateway
+    if ($LASTEXITCODE -ne 0) { throw 'disposable agent gateway database creation failed' }
+    $agentEvidence = Join-Path $evidence 'agent-gateway.log'
+    & node --import $importUrls[0] --import $importUrls[1] `
+        (Join-Path $Repo 'tests/host-agent-gateway.integration.mjs') 2>&1 | Tee-Object -FilePath $agentEvidence
+    if ($LASTEXITCODE -ne 0) { throw 'Windows authenticated agent gateway failed' }
+    if (-not (Select-String -LiteralPath $agentEvidence -SimpleMatch '"check":"isolated-authenticated-agent-gateway"' -Quiet)) { throw 'agent gateway evidence missing' }
+    & (Join-Path $postgresBin 'dropdb.exe') -h 127.0.0.1 -p $postgresPort -U wp01_probe paperclip_m365_agent_gateway
+    if ($LASTEXITCODE -ne 0) { throw 'disposable agent gateway database cleanup failed' }
 } finally {
     Remove-Item Env:PAPERCLIP_DATABASE_URL -ErrorAction SilentlyContinue
     Remove-Item Env:WP00_DATABASE_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:WP01_PACKAGE_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:WP11_PG_DUMP -ErrorAction SilentlyContinue
+    Remove-Item Env:WP11_PG_RESTORE -ErrorAction SilentlyContinue
+    Remove-Item Env:WP11_BACKUP_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PAPERCLIP_AGENT_GATEWAY_DATABASE_URL -ErrorAction SilentlyContinue
     Remove-Item Env:PAPERCLIP_LIFECYCLE_RESULT_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:PAPERCLIP_LIFECYCLE_PHASE_PATH -ErrorAction SilentlyContinue
     if ($postgresStarted) {
@@ -226,5 +254,7 @@ try {
     wp02PostgresAssertions = '6/6'
     wp03PostgresAssertions = '11/11'
     wp04PostgresAssertions = '6/6'
+    wp11PostgresAssertions = '5/5'
+    authenticatedAgentGateway = 'actual-worker-jwt-http'
     packageDigestVerifiedAt = @('install', 'restore')
 } | ConvertTo-Json -Compress

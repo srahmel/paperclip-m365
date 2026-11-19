@@ -203,7 +203,8 @@ export class GraphClient {
         throw failure;
       }
       const retryAfter = retryAfterSeconds(response.headers["retry-after"], this.#now());
-      this.#emit({ operationType: request.operationType, statusClass: `${Math.floor(response.status / 100)}xx` as GraphSignal["statusClass"], durationMs: this.#now() - start, ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }) });
+      this.#emit({ operationType: request.operationType, statusClass: `${Math.floor(response.status / 100)}xx` as GraphSignal["statusClass"], durationMs: this.#now() - start,
+        ...(response.status === 429 ? { errorClass: "throttled" as const } : {}), ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }) });
       if (!mutation && [429, 500, 502, 503, 504].includes(response.status) && attempt < 2) {
         const wait = retryAfter === undefined ? 500 * 2 ** attempt : retryAfter * 1000;
         if (wait >= deadline - this.#now()) throw fixedError(response.status, false);

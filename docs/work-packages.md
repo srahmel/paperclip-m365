@@ -1,6 +1,10 @@
 # Arbeitspakete für das Microsoft 365 Plugin
 
-Stand: 16. November 2026. Die bestätigten Anforderungen sind eigene und gemeinsam genutzte Kontoverbindungen sowie Softeria als Funktionsreferenz. Diese Pakete beschreiben die Umsetzung; sie sind noch nicht umgesetzt oder als Aufgaben an Agenten verteilt.
+Stand des Plans: 16. November 2026; Entwicklungsnachtrag: 19. November 2026. Die bestätigten Anforderungen sind eigene und gemeinsam genutzte Kontoverbindungen sowie Softeria als Funktionsreferenz. Die ursprünglichen Abnahmekriterien bleiben unten erhalten. WP00–WP04 sind inzwischen implementiert und auf eingefrorenen Commits unabhängig geprüft; die historischen Gate-Texte weiter unten beschreiben den damaligen Planstand.
+
+**Aktueller Entwicklungsstand:** WP04 ist auf `56e10ed32ed665e8dea8647cd12d2bbd1e5d76c3` mit zwei unabhängigen positiven Fachurteilen und grüner Windows-/Linux-CI abgenommen. WP05–WP08 werden auf dieser Grundlage integriert; ihre abschließende Abnahme ist noch offen. Reale Microsoft-/Tenant-/Produktionsaktionen und der gemeinsame versionsgebundene DB-/Key-/Paket-Restore sind daraus nicht freigegeben.
+
+**Begründete Grenze für WP08:** Inhaltsersetzung und Ordnerlöschung bleiben im aktuellen Entwicklungsstand ausdrücklich gesperrt. Beim vorgesehenen einfachen Content-PUT ist kein belastbarer atomarer `If-Match`-Vertrag nachgewiesen; ein Ordner-ETag beweist nicht atomar, dass keine Kinder hinzugekommen sind. Ein Preflight allein erfüllt diese Sicherheitsanforderungen nicht. Der Code ersetzt diese Operationen weder durch ungeprüftes Überschreiben noch durch rekursives Löschen oder Upload-Sessions. Diese beiden ursprünglich geplanten Funktionen gelten daher nicht als erfüllt; Details stehen in [WP08](wp08-drive.md).
 
 Ein Personentag entspricht etwa acht Stunden Entwicklungsarbeit. Schätzungen schließen die jeweilige Dokumentation und gezielte Tests ein. Die Summe enthält die Pflichtpakete, jedoch keine administrativen Wartezeiten und keine optionalen Erweiterungen.
 

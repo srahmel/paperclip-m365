@@ -96,7 +96,9 @@ describe("M365 plugin scaffold", () => {
       "plugin.state.read",
       "plugin.state.write",
     ]);
-    expect(manifest.tools?.map((tool) => tool.name)).toEqual(["operation-get-result", "operation-get-status", "connection-get-status"]);
+    expect(manifest.tools?.map((tool) => tool.name)).toEqual(expect.arrayContaining(["operation-get-result", "operation-get-status", "connection-get-status", "mail-list-messages", "calendar-list-events", "drive-list-children"]));
+    expect(new Set(manifest.tools?.map(tool => tool.name)).size).toBe(manifest.tools?.length);
+    expect(manifest.tools?.some(tool => /execute|raw-request/.test(tool.name))).toBe(false);
     expect(manifest.apiRoutes).toBeUndefined();
     expect(manifest.jobs?.map((job) => job.jobKey)).toEqual(["operation-retention", "telemetry-evaluate"]);
   });
