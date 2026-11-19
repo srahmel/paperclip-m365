@@ -5,6 +5,7 @@ import {
   assertAllowedPackageFiles,
   assertArtifactIntegrity,
   compareArtifactManifests,
+  resolveSourceRevision,
 } from "../scripts/package-integrity.mjs";
 
 const revision = "a".repeat(40);
@@ -13,6 +14,16 @@ const filename = "paperclip-plugin-m365-0.1.0.tgz";
 const files = [
   { path: "dist/manifest.js", mode: 0o644, size: 12, sha256: "c".repeat(64) },
 ];
+
+test("package revision rejects stale checkout metadata and requires explicit archive provenance", () => {
+  assert.equal(resolveSourceRevision(undefined, revision), revision);
+  assert.equal(resolveSourceRevision(revision, revision), revision);
+  assert.throws(() => resolveSourceRevision("b".repeat(40), revision), /differs from checkout HEAD/);
+  assert.throws(() => resolveSourceRevision("", revision), /differs from checkout HEAD/);
+  assert.equal(resolveSourceRevision(revision, undefined), revision);
+  assert.throws(() => resolveSourceRevision(undefined, undefined), /explicit exact revision/);
+  assert.throws(() => resolveSourceRevision("main", undefined), /explicit exact revision/);
+});
 
 test("package policy rejects sensitive basenames with extensions and source maps", () => {
   for (const path of [

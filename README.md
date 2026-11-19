@@ -34,6 +34,12 @@ sensitive filenames, then emits a revision-bound `.tgz` SHA-256 plus normalized
 per-file content hashes. CI compares the Linux and Windows manifests before it
 publishes the single hash-bound acceptance artifact.
 
+In a Git checkout, `WP01_SOURCE_REVISION`, when supplied, must equal the actual
+HEAD or packaging fails before creating an artifact. The isolated CI source
+archive has no Git metadata and therefore requires its explicit source revision.
+Pre-commit checks are working-tree checks; only the post-commit receipt and the
+exact-commit CI establish candidate evidence.
+
 No credentials are required. Future configuration examples must use placeholders
 only; secrets belong in the Paperclip Secret Store.
 

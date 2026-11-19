@@ -3,11 +3,21 @@ import { execFileSync } from "node:child_process";
 import { access, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createArtifactManifest } from "./package-integrity.mjs";
+import { createArtifactManifest, resolveSourceRevision } from "./package-integrity.mjs";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const npmCli = process.env.npm_execpath;
 assert(npmCli, "npm_execpath is required");
+
+// CI's isolated source archive deliberately has no .git. A real checkout must
+// never silently accept stale revision metadata from a previous local command.
+let hasCheckout = true;
+try { await access(resolve(projectRoot, ".git")); }
+catch (error) { if (error.code !== "ENOENT") throw error; hasCheckout = false; }
+const checkoutRevision = hasCheckout
+  ? execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim()
+  : undefined;
+const sourceRevision = resolveSourceRevision(process.env.WP01_SOURCE_REVISION, checkoutRevision);
 
 const raw = execFileSync(
   process.execPath,
@@ -39,8 +49,6 @@ for (const requiredFile of requiredFiles) {
   assert(files.includes(requiredFile), `packed artifact is missing ${requiredFile}`);
 }
 
-const sourceRevision = process.env.WP01_SOURCE_REVISION
-  ?? execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim();
 const artifactManifest = await createArtifactManifest({
   artifactPath,
   projectRoot,

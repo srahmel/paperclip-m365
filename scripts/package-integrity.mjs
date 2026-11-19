@@ -6,6 +6,15 @@ import { fileURLToPath } from "node:url";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const REVISION = /^[a-f0-9]{40}$/;
+export function resolveSourceRevision(declaredRevision, checkoutRevision) {
+  if (checkoutRevision !== undefined) {
+    assert.match(checkoutRevision, REVISION, "checkout has no exact source revision");
+    if (declaredRevision !== undefined) assert.equal(declaredRevision, checkoutRevision, "declared source revision differs from checkout HEAD");
+    return checkoutRevision;
+  }
+  assert.match(declaredRevision ?? "", REVISION, "source archive requires an explicit exact revision");
+  return declaredRevision;
+}
 const SENSITIVE_BASENAME = /^(?:\.env(?:\..+)?|\.npmrc|credentials?|cookies?|sessions?|tokens?)(?:\.[^/]+)?$/i;
 
 function sha256(content) {
