@@ -1,10 +1,10 @@
 # Recherche zu Paperclip und Microsoft 365
 
-Stand: 15. November 2026. Die folgenden Primärquellen begründen den Architekturplan. Dokumentierte API-Verfügbarkeit ist von einem erfolgreichen Test in einer konkreten Paperclip-Instanz und einem konkreten Microsoft-Tenant zu unterscheiden.
+Stand: 16. November 2026. Die folgenden Primärquellen begründen den Architekturplan. Dokumentierte API-Verfügbarkeit ist von einem erfolgreichen Test in einer konkreten Paperclip-Instanz und einem konkreten Microsoft-Tenant zu unterscheiden.
 
 ## Paperclip
 
-Die lokale Quellprüfung erfolgte auf Paperclip-Commit `c645b7795b5665eaafb3a30fe23e2deb0811dc6e`. Dieser lokale Commit ist im öffentlichen Upstream nicht verfügbar. Die relevanten Verträge zu Actor-Kontext, Secret-Auflösung, Manifest und Gateway wurden zusätzlich im öffentlichen Upstream-Commit `304e40fe9c6dde1d273710c30c137f62f1db4593` geprüft; die Quellverweise unten sind darauf festgelegt. Die lokal untersuchten SDK-Quelldateien nennen Version `1.0.0` und Node.js ab `24.11.0`. WP00 gleicht die tatsächlich zu unterstützende Installation mit dem benötigten Vertrag ab.
+WP00 prüfte ursprünglich den lokalen Dirty-Host `c645b7795b5665eaafb3a30fe23e2deb0811dc6e`; dieser Stand bleibt historische Beobachtung, ist aber kein WP01-Pin. WP01A bindet nun den sauberen öffentlichen Commit `d69631b01b9c658f80bf8bed389863dce82643e1` aus Tag `v2026.1106.0`, dessen Frozen-Lockfile sowie die veröffentlichten Registry-Artefakte `@paperclipai/plugin-sdk@2026.1106.0` und `@paperclipai/shared@2026.1106.0`. Fingerprint, Registry-Wiederherstellung, PostgreSQL 20/20, Offline-Gateway, Typecheck und SDK 28/28 sind grün; Quellen, Integritäten und Grenzen stehen im [WP01-Pin-Nachweis](wp01-sdk-shared-pin.md).
 
 | Quelle | Nachgewiesener Vertrag | Folgerung für den Plan |
 | --- | --- | --- |
@@ -19,7 +19,7 @@ Die lokale Quellprüfung erfolgte auf Paperclip-Commit `c645b7795b5665eaafb3a30f
 | [Plugin-Routen](https://github.com/paperclipai/paperclip/blob/304e40fe9c6dde1d273710c30c137f62f1db4593/server/src/routes/plugins.ts) | Company- und Run-Prüfungen; Action-Actor wird aus authentisiertem Request erzeugt | Gefälschte Identitäten und Company-Wechsel in Integrationstests abdecken. |
 | [Tool Gateway](https://github.com/paperclipai/paperclip/blob/304e40fe9c6dde1d273710c30c137f62f1db4593/server/src/services/tool-gateway.ts) | Prüft Agent und Run; Plugin-Risiko wird über `inferToolRisk(tool.name)` zugeordnet | Host-Prüfungen beibehalten und konkrete Ressourcenfreigabe zusätzlich absichern. |
 
-Die Definition von `PluginToolDeclaration` bietet im untersuchten Stand keine ausführliche deklarative Trennung aller fachlichen Nebenwirkungen. Ein Name oder UI-Label ist deshalb kein Ersatz für eine serverseitige Berechtigungsprüfung. Der Host besitzt eigene Freigabefunktionen; ob sie den konkreten Änderungsauftrag unveränderlich binden können, wird in WP00 entschieden.
+Die Definition von `PluginToolDeclaration` bietet im untersuchten Stand keine ausführliche deklarative Trennung aller fachlichen Nebenwirkungen. Ein Name oder UI-Label ist deshalb kein Ersatz für eine serverseitige Berechtigungsprüfung. WP00 fand keine pluginseitige native Create-and-bind-Approval-Schnittstelle für den vollständigen M365-Payload und wählte deshalb Action-Harness plus privaten unveränderlichen Snapshot und CAS-Reservierung. Dieser Probe belegt noch keine persistierte tatsächliche Human-Entscheidung, Auditkorrelation oder getrennte spätere Ausführung; diese Nachweise bleiben harte WP03-Gates.
 
 ## Softeria
 
@@ -76,9 +76,10 @@ Für Version 1 wird delegierter Zugriff geplant. Ein Microsoft-Benutzer und ein 
 
 Die ältere OneDrive-spezifische [Scope-Übersicht](https://learn.microsoft.com/en-us/onedrive/developer/rest-api/concepts/permissions_reference) und die aktuelle Graph-Berechtigungsreferenz unterscheiden sich unter anderem bei AppFolder-Angaben. Für die konkrete Umsetzung sind deshalb die aktuellen Graph-Endpoint-Verträge und die Graph-Berechtigungsreferenz maßgeblich. Version 1 benötigt AppFolder nicht.
 
-## Noch zu erbringende technische Nachweise
+## Erbrachte und noch offene technische Nachweise
 
-- Host-Version, authentisierter Freigabepfad, sichere Agentenidentität und exaktes Transportlimit in WP00.
+- WP00 lokal erbracht: selbstprüfender Host-/SDK-/Runner-Fingerprint, offline Gateway-Allowlist, Actor-/Rechteprüfung im authentisierten Action-Harness, unveränderliche Snapshot-Bindung, persistente PostgreSQL-CAS-Reservierung mit genau einem Gewinner, Replay-/TOCTOU-/Restart-/`unknown`-Nachweis und striktes 4-MiB-Base64-Limit. Nicht erbracht sind persistierte tatsächliche Actor-ID/Entscheid/Entscheidungszeit, Auditkorrelation, getrennte Executor-Stufe, `succeeded`-/`failed`-Terminalpfade und Graph-Mutation. Der frühere Live-Tool-Dispatch ist kein aktueller Sicherheitsnachweis. Versuchsaufbau und Grenzen stehen in [ADR 0001](decisions/0001-paperclip-runtime-contracts.md); unabhängige Vera-/Hagen-Re-Reviews auf demselben Korrekturcommit bleiben vor WP01 erforderlich.
+- WP03 offen und vor jeder Mutation zwingend: atomare Human-Entscheid-/Auditpersistenz oder nachgewiesene fail-closed Kompensation, Zustände `approved`/`executing`/`succeeded`/`failed`/`unknown`, getrennte Snapshot-only-Executor-Stufe sowie Tests für genau einen Executor, Replay, Crash/Restart, Rechteentzug, Payloadmanipulation und alle Terminalausgänge ohne automatischen `unknown`-Replay.
 - Erfolgreiche Anmeldung und Consent im vorgesehenen Test-Tenant in WP02.
 - ETags, Konfliktverhalten und sichere Wiederholungen je tatsächlich genutztem Endpoint in den Fachpaketen.
 - Echte Agentenaufrufe einschließlich abgewiesener Fälle sowie Installation aus einem gepackten Artefakt in WP10 und WP11.

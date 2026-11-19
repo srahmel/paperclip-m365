@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "minimumFreeGiB": 6,
+  "reserveFreeGiB": 2,
+  "windows": {
+    "node": "24.22.1",
+    "npm": "11.19.1",
+    "corepack": "0.34.5",
+    "pnpm": "9.15.4",
+    "git": "2.47.1.windows.2",
+    "python": "3.14.0",
+    "postgresqlMajor": "17",
+    "visualStudio": "2022",
+    "msvc": "14.44.35207",
+    "windowsSdk": "10.0.26100.0",
+    "vsDevCmd": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\Tools\\VsDevCmd.bat",
+    "nodeHeadersVersion": "24.22.1",
+    "workspaceRoot": "F:\\w\\m365",
+    "pnpmStoreRoot": "F:\\w\\pnpm-store",
+    "npmCacheRoot": "F:\\w\\npm-cache",
+    "nodeGypRoot": "F:\\w\\node-gyp"
+  },
+  "linuxX64": {
+    "baseImage": "postgres:17.7-bookworm@sha256:e9243ab06e47223dedeb3c129fa9ece8d37f506bdc6ee943afb9335f98bb4854",
+    "nodeImage": "node:24.22.1-bookworm@sha256:0925478b811e8890f5508ad2a75135933310effd45492696ecf7c111c8339d02",
+    "node": "24.22.1",
+    "npm": "11.19.1",
+    "corepack": "0.34.5",
+    "pnpm": "9.15.4",
+    "git": "2.39.5",
+    "python": "3.11.2",
+    "postgresql": "17.7",
+    "gcc": "12.2.0",
+    "gpp": "12.2.0",
+    "make": "4.3",
+    "nodeGyp": "12.1.0",
+    "debianSnapshot": "20260203T000000Z",
+    "limits": {
+      "wallSeconds": 180,
+      "cpuSeconds": 150,
+      "addressSpaceBytes": 3221225472,
+      "processes": 128,
+      "openFiles": 4096,
+      "fileBytes": 1073741824
+    }
+  }
+}

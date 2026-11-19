@@ -1,0 +1,202 @@
+name: WP01 isolated reproducibility gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [hum-282-wp01a-reproducible-pin, hum-323-wp01-scaffold, hum-344-wp02-auth-connections, codex/m365-wp03-governed-operations, codex/m365-wp04-graph-telemetry, codex/m365-domain-tools]
+    paths:
+      - ".github/workflows/wp01-isolated-gate.yml"
+      - ".github/workflows/wp01-plugin-package.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/**"
+      - "src/**"
+      - "tests/**"
+      - "migrations/**"
+      - "experiments/wp00/**"
+      - "docs/wp01-sdk-shared-pin.md"
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact review commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+
+      - name: Build pinned runner image
+        id: build
+        run: |
+          set -Eeuo pipefail
+          evidence="${RUNNER_TEMP}/wp01-evidence"
+          install -d -m 0777 "$evidence"
+          set +e
+          docker build --progress=plain --pull=false --tag wp01-runner:${GITHUB_SHA} \
+            --file experiments/wp00/ci/Dockerfile . 2>&1 | tee "$evidence/image-build.log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            detail=$(tail -n 8 "$evidence/image-build.log" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
+            printf '%s\n' "::error title=Pinned runner image build failed::${detail}"
+            exit "$build_status"
+          fi
+
+      - name: Build fresh source and verified artifacts
+        id: setup
+        run: |
+          set -Eeuo pipefail
+          work="${RUNNER_TEMP}/wp01-build"
+          evidence="${RUNNER_TEMP}/wp01-evidence"
+          install -d -m 0777 "$work"
+          set +e
+          docker run --rm --user 999:999 \
+            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
+            --mount "type=bind,src=${work},dst=/work" \
+            wp01-runner:${GITHUB_SHA} \
+            /bin/bash /repo/experiments/wp00/ci/setup.sh /repo /work "$GITHUB_SHA" 2>&1 | tee "$evidence/setup.log"
+          setup_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$setup_status" -ne 0 ]; then
+            detail=$(tail -n 8 "$evidence/setup.log" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
+            printf '%s\n' "::error title=Fresh source setup failed::${detail}"
+            exit "$setup_status"
+          fi
+
+      - name: Run complete matrix without network
+        id: gate
+        run: |
+          set -Eeuo pipefail
+          work="${RUNNER_TEMP}/wp01-build"
+          scratch="${RUNNER_TEMP}/wp01-scratch"
+          evidence="${RUNNER_TEMP}/wp01-evidence"
+          install -d -m 0777 "$scratch"
+          set +e
+          docker run --rm --user 999:999 --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --cpus 2 --memory 3g --memory-swap 3g --pids-limit 128 \
+            --ulimit cpu=150:150 --ulimit nproc=128:128 --ulimit nofile=4096:4096 --ulimit fsize=1073741824:1073741824 \
+            --tmpfs /dev/shm:ro,noexec,nosuid,nodev,size=64m \
+            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
+            --mount "type=bind,src=${work}/source,dst=/source,readonly" \
+            --mount "type=bind,src=${work}/tarballs,dst=/tarballs,readonly" \
+            --mount "type=bind,src=${work}/packages,dst=/packages,readonly" \
+            --mount "type=bind,src=${work}/plugin-installed,dst=/plugin-installed,readonly" \
+            --mount "type=bind,src=${work}/plugin-artifact,dst=/plugin-artifact,readonly" \
+            --mount "type=bind,src=${work}/readonly-empty,dst=/var/lib/postgresql/data,readonly" \
+            --mount "type=bind,src=${scratch},dst=/scratch" \
+            --entrypoint /usr/bin/env wp01-runner:${GITHUB_SHA} -i \
+            PATH=/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/bin:/bin \
+            HOME=/scratch/home TMPDIR=/scratch LANG=C.UTF-8 \
+            WP01_SOURCE_REVISION="$GITHUB_SHA" \
+            /usr/bin/timeout --signal=KILL 180s /bin/bash /repo/experiments/wp00/ci/run-full-gate.sh \
+            2>&1 | tee "$evidence/full-gate.log"
+          gate_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$gate_status" -ne 0 ]; then
+            detail=$(tail -n 8 "$evidence/full-gate.log" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
+            printf '%s\n' "::error title=Isolated full matrix failed::${detail}"
+            exit "$gate_status"
+          fi
+
+      - name: Publish reviewer-readable evidence summary
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          set -Eeuo pipefail
+          evidence="${RUNNER_TEMP}/wp01-evidence"
+          install -d -m 0777 "$evidence"
+          summary="$evidence/review-summary.md"
+          workflow_sha=$(sha256sum .github/workflows/wp01-isolated-gate.yml | cut -d' ' -f1)
+          {
+            printf '# WP01 isolated reproducibility evidence\n\n'
+            printf -- '- Head SHA: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Workflow SHA-256: `%s`\n' "$workflow_sha"
+            printf -- '- Run: [%s/%s](%s/%s/actions/runs/%s)\n\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf '## Step outcomes\n\n'
+            printf '| build | setup | isolated gate |\n| --- | --- | --- |\n| %s | %s | %s |\n\n' "$BUILD_OUTCOME" "$SETUP_OUTCOME" "$GATE_OUTCOME"
+            printf '## Isolation contract\n\n'
+            printf -- '- Network: `none`; environment: explicit allowlist via `env -i`\n'
+            printf -- '- Read-only: root, repository, source, tarballs, prepared packages, PostgreSQL default data path\n'
+            printf -- '- Privileges: UID/GID 999, all capabilities dropped, `no-new-privileges`\n'
+            printf -- '- Limits: 2 CPUs, 3 GiB RAM/no swap, 128 PIDs, 4096 FDs (bounded host gateway import), 1 GiB file size, 150 CPU seconds, 180 wall seconds\n\n'
+            printf '## Machine-readable gate results\n\n```json\n'
+            if [ -f "$evidence/setup.log" ]; then grep -E '^\{"probe":' "$evidence/setup.log" || true; fi
+            if [ -f "$evidence/full-gate.log" ]; then grep -E '^\{"probe":' "$evidence/full-gate.log" || true; fi
+            printf '```\n\n## Log checksums\n\n```text\n'
+            find "$evidence" -maxdepth 1 -type f -name '*.log' -print0 | sort -z | xargs -0 -r sha256sum
+            printf '```\n'
+          } > "$summary"
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload auditable gate log
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: wp01-isolated-gate-${{ github.sha }}
+          path: ${{ runner.temp }}/wp01-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-x64:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact review commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+
+      - name: Use pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.22.1
+          registry-url: https://registry.npmjs.org
+
+      - name: Pin npm and Corepack without global mutation
+        shell: pwsh
+        run: |
+          npm install --prefix "$env:RUNNER_TEMP/wp01-tooling" --ignore-scripts npm@11.19.1 corepack@0.34.5
+          (Join-Path $env:RUNNER_TEMP 'wp01-tooling/node_modules/.bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify runner contract
+        run: npm run check:runner
+
+      - name: Run pinned Windows host lifecycle
+        shell: pwsh
+        run: |
+          & ./experiments/wp00/ci/run-windows-lifecycle.ps1 `
+            -Repo $env:GITHUB_WORKSPACE `
+            -Work (Join-Path $env:RUNNER_TEMP 'wp01-windows-lifecycle') `
+            -SourceRevision $env:GITHUB_SHA
+
+      - name: Publish Windows machine-readable evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP 'wp01-windows-lifecycle/evidence'
+          if (Test-Path -LiteralPath $evidence) {
+            Get-ChildItem -LiteralPath $evidence -File | ForEach-Object {
+              "## $($_.Name)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              "size=$($_.Length) sha256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              '```text' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              Get-Content -LiteralPath $_.FullName | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+            }
+          }
+
+      - name: Upload Windows lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: wp01-windows-lifecycle-${{ github.sha }}
+          path: ${{ runner.temp }}/wp01-windows-lifecycle/evidence/
+          if-no-files-found: error
+          retention-days: 14

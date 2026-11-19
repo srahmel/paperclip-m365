@@ -1,0 +1,118 @@
+name: WP01 plugin package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [hum-323-wp01-scaffold, hum-344-wp02-auth-connections, codex/m365-wp03-governed-operations, codex/m365-wp04-graph-telemetry, codex/m365-domain-tools]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: windows-2025
+            platform: windows
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Use pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.22.1
+          registry-url: https://registry.npmjs.org
+
+      - name: Pin npm and Corepack without global mutation
+        run: |
+          npm install --prefix "${{ runner.temp }}/wp01-tooling" --ignore-scripts npm@11.19.1 corepack@0.34.5
+          node -e "require('node:fs').appendFileSync(process.env.GITHUB_PATH, require('node:path').join(process.env.RUNNER_TEMP, 'wp01-tooling', 'node_modules', '.bin') + require('node:os').EOL)"
+
+      - name: Verify runner contract
+        run: npm run check:runner
+
+      - name: Restore exact lock without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Verify policy, types, tests, build, and package
+        env:
+          WP01_SOURCE_REVISION: ${{ github.sha }}
+          WP01_PACKAGE_MANIFEST: ${{ github.workspace }}/wp01-package-manifest.json
+        run: npm run verify
+
+      - name: Upload verified package
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: paperclip-plugin-m365-${{ matrix.platform }}-${{ github.sha }}
+          path: |
+            paperclip-plugin-m365-0.1.0.tgz
+            wp01-package-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  package-identity:
+    name: Cross-OS package identity
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Use pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.22.1
+
+      - name: Download Linux package candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: paperclip-plugin-m365-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/linux
+
+      - name: Download Windows package candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: paperclip-plugin-m365-windows-${{ github.sha }}
+          path: ${{ runner.temp }}/windows
+
+      - name: Prove mismatch gate fails closed
+        run: node --test ./tests/package-integrity.test.mjs
+
+      - name: Compare SHA-256 and normalized content lists
+        id: compare
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node scripts/package-integrity.mjs compare \
+            "${RUNNER_TEMP}/linux/wp01-package-manifest.json" \
+            "${RUNNER_TEMP}/windows/wp01-package-manifest.json" \
+            "${RUNNER_TEMP}/wp01-acceptance-manifest.json"
+          digest=$(node -p "require(process.argv[1]).acceptanceArtifact.sha256" "${RUNNER_TEMP}/wp01-acceptance-manifest.json")
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          cmp "${RUNNER_TEMP}/linux/paperclip-plugin-m365-0.1.0.tgz" \
+            "${RUNNER_TEMP}/windows/paperclip-plugin-m365-0.1.0.tgz"
+
+      - name: Publish acceptance evidence
+        shell: bash
+        run: |
+          cat "${RUNNER_TEMP}/wp01-acceptance-manifest.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the single hash-bound acceptance artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: paperclip-plugin-m365-acceptance-${{ github.sha }}-${{ steps.compare.outputs.digest }}
+          path: |
+            ${{ runner.temp }}/linux/paperclip-plugin-m365-0.1.0.tgz
+            ${{ runner.temp }}/wp01-acceptance-manifest.json
+          if-no-files-found: error
+          retention-days: 14

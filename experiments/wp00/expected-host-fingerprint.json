@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "source": {
+    "repository": "https://github.com/paperclipai/paperclip.git",
+    "tag": "v2026.1106.0",
+    "commit": "d69631b01b9c658f80bf8bed389863dce82643e1",
+    "tree": "1955a72d50a89ef05295791948b78c93e36615a6",
+    "trackedDiffHash": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "packageManager": "pnpm@9.15.4",
+    "lockfile": {
+      "path": "pnpm-lock.yaml",
+      "sha256": "242f0f08eb06fb2add28773f85a91d5e00a7ff8d71288d2d12a1163bee62d4e5"
+    }
+  },
+  "registryLockPath": "registry-pin/package-lock.json",
+  "registryPackages": {
+    "@paperclipai/plugin-sdk": {
+      "version": "2026.1106.0",
+      "resolved": "https://registry.npmjs.org/@paperclipai/plugin-sdk/-/plugin-sdk-2026.1106.0.tgz",
+      "integrity": "sha512-dmRBcyEIsqKAxBfrqwVGNxnARCwsGCt2bhrch49E0jhGzo0wwn501W9B3YADggSTSbm81FxMu8/G9z/jDrNeKA==",
+      "tarball": "paperclipai-plugin-sdk-2026.1106.0.tgz",
+      "contentManifest": "sha256-c26867f8b751e0bad0278036550f839facb02dddd9c8441adf6bfcc09912a639",
+      "dependencies": {
+        "@paperclipai/shared": "2026.1106.0",
+        "zod": "^4.4.3"
+      }
+    },
+    "@paperclipai/shared": {
+      "version": "2026.1106.0",
+      "resolved": "https://registry.npmjs.org/@paperclipai/shared/-/shared-2026.1106.0.tgz",
+      "integrity": "sha512-fleBeHYbmnwdvEuzyQ4ABUFbHzqft47ni/ZktF1jWQsFkyfHmHBz5xFm3nfD3WZQ9UGnVZmXfEhfk+nizpeGEQ==",
+      "tarball": "paperclipai-shared-2026.1106.0.tgz",
+      "contentManifest": "sha256-96d76abc022b71713b815743a2e431516c61600d589f60d7bff306899becdbb7",
+      "dependencies": {
+        "three": "0.185.1",
+        "zod": "^4.4.3"
+      }
+    },
+    "zod": {
+      "version": "4.6.7",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "tarball": "zod-4.6.7.tgz",
+      "contentManifest": "sha256-81e78a64be2f52a20e48681f0ee4d88565b7624d4faf5d5d44e90a61521868f9"
+    },
+    "three": {
+      "version": "0.185.1",
+      "resolved": "https://registry.npmjs.org/three/-/three-0.185.1.tgz",
+      "integrity": "sha512-5aojFCXKwnjBRZvUnt3WFfEcvUJgkN5LlijRFN95hMy8WVkG4I0QNcJE+OuWvuJ0bOdStrbfXn0pkd6/QyiAlg==",
+      "tarball": "three-0.185.1.tgz",
+      "contentManifest": "sha256-6d7a8b1fd01c20fc8889718cf2b7a8401372f761eaf857e5ad9cec524bd99b23"
+    }
+  },
+  "nodeVersion": "24.22.1",
+  "sdk": {
+    "name": "@paperclipai/plugin-sdk",
+    "sourceVersion": "1.0.0",
+    "publishedVersion": "2026.1106.0",
+    "nodeEngine": ">=24.11.0"
+  },
+  "runner": {
+    "package": "tsx",
+    "version": "4.23.15",
+    "relativeCliPath": "node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/cli.mjs"
+  },
+  "files": {
+    "server/src/app.ts": "fa3b5d15a7ddf808923befd0eefb92297b1c774c97c26c8b0b8b0056cba71611",
+    "server/src/http/body-limits.ts": "4f3979aca618f3cf30a21e9d88bd0cde836864118ad9ec48b9ccf724657c7474",
+    "server/src/routes/plugins.ts": "28960dbf39e8d34dd926cab7a268e2c35987d71ab65b043b5c25dbbb811819d2",
+    "server/src/services/plugin-tool-dispatcher.ts": "ba8a57f0eb1fc23acf74a16ec9e0654f29882c4528846571805a77bf85e3a2b5",
+    "server/src/services/tool-gateway.ts": "bb61025e22d313b9087d57ad8115c9b85bb1e61896c8eb8208d4e9f49bdad487",
+    "server/src/services/plugin-database.ts": "fe6030460edb3308ed6a2f1f309451424420e6bc4b6ddb90b23b9e6274fc3f9b",
+    "packages/plugins/sdk/package.json": "66f149da7b5c10aed42c3bcd92a0aa5af46fe25cc8d3bebb2e0d9ab60a2ec7b2",
+    "packages/plugins/sdk/src/protocol.ts": "0320a7edda9a730edc889d70d01fb513198649f3e97d3512be05f01794050c42",
+    "packages/plugins/sdk/src/types.ts": "d9ba8ad4697798a461a0978e9af58a90c5fa3355f94a623e02af5797a76b44a6",
+    "packages/plugins/sdk/src/testing.ts": "d0970a6b5707332d92eb6d2472b1fde627ba1738c3e06099b8ba9c56914fb5f6",
+    "packages/plugins/sdk/src/worker-rpc-host.ts": "9ff1181ae0f1997ce45aa4c1cd4a69ed128c18fd1222a18a9ba8e606c43adfab",
+    "packages/shared/src/types/plugin.ts": "34756901ba00790c07925680c42ef7d15a7021f6599546b8db74d66115193ba2",
+    "packages/shared/src/constants.ts": "3c498286de0347b39875c47f946d736a42b8b959b6fa79c3db2b81274649d321",
+    "packages/shared/src/connection-intent-guidance.ts": "5e24b2e383c05cd1aad613a13a4fa7807e76554d23034206dde93f58a244928b",
+    "server/src/index.ts": "a12294e2e21cbfbb39f73a80ecff749ab627ad82858d35cd9c791d16f11569d9",
+    "node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/package.json": "ab5f14c4251638844ade3905d3cfc52fc1c833644694d655a05f6d0ca746b83c",
+    "node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/cli.mjs": "8690135061bc49d187143493b82d26a09b7fb71d6dd817d2242cc9dc52506de9"
+  }
+}

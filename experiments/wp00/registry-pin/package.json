@@ -1,0 +1,9 @@
+{
+  "name": "paperclip-m365-wp01-registry-pin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Lock-only proof for the Paperclip SDK and its published transitive artifacts.",
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "2026.1106.0"
+  }
+}

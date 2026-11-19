@@ -1,0 +1,61 @@
+{
+  "name": "paperclip-plugin-m365",
+  "version": "0.1.0",
+  "description": "Governed Microsoft 365 tools for Paperclip",
+  "type": "module",
+  "license": "MIT",
+  "author": "Encurio GmbH",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "docs/runbooks/m365-operations.md",
+    "docs/wp04-transport-monitoring.md",
+    "docs/wp05-mail.md",
+    "docs/wp07-calendar.md",
+    "docs/wp08-drive.md",
+    "docs/domain-runtime.md",
+    "docs/wp11-recovery.md",
+    "docs/wp10-agent-boundary.md",
+    "docs/wp09-ui-validation.md",
+    "docs/decisions/0002-development-delivery-boundary.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
+  },
+  "scripts": {
+    "clean": "node ./scripts/clean-dist.mjs",
+    "build": "npm run clean && node ./esbuild.config.mjs",
+    "check:dependencies": "node ./scripts/check-dependencies.mjs",
+    "check:runner": "node ./scripts/check-runner.mjs",
+    "check:secrets": "node ./scripts/check-secrets.mjs",
+    "check:policy": "npm run check:dependencies && npm run check:secrets",
+    "pack:verify": "node ./scripts/verify-pack.mjs",
+    "test": "vitest run --config ./vitest.config.ts && node --test ./tests/package-integrity.test.mjs ./tests/lifecycle-evidence.test.mjs ./tests/lifecycle-watchdog.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run check:policy && npm run typecheck && npm test && npm run build && npm run pack:verify"
+  },
+  "dependencies": {
+    "@azure/msal-node": "7.2.3",
+    "@paperclipai/plugin-sdk": "2026.1106.0",
+    "@paperclipai/shared": "2026.1106.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.18",
+    "esbuild": "0.28.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}
