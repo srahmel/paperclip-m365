@@ -78,7 +78,7 @@ Unit and SDK-harness tests cover authorization, spoofed identities, malformed
 policies, canonical snapshots, live approver revocation, policy/connection changes,
 parallel decisions/executors, pre-dispatch validation, uncertain results,
 retention, and stale UI responses. Eight PostgreSQL tests use the pinned host's
-actual SQL validators and controlled competing transactions. It checks atomic
+actual SQL validators, PostgreSQL/Drizzle driver initialization, per-occurrence parameter binding and controlled competing transactions. The private host binding helper is reproduced in the test adapter; full capability registration is exercised separately by the host lifecycle suite. The database tests check atomic
 decision/audit persistence, one executor, policy/disconnect ordering, restart
 recovery, expiry and tenant isolation.
 

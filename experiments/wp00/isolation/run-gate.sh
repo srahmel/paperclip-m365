@@ -12,7 +12,7 @@ command -v timeout >/dev/null || fail "timeout is unavailable"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/wp01-gate-XXXXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT HUP INT TERM
 
-exec timeout --signal=KILL 180s prlimit --cpu=150 --as=3221225472 --nproc=128 --nofile=1024 --fsize=1073741824 -- \
+exec timeout --signal=KILL 180s prlimit --cpu=150 --as=3221225472 --nproc=128 --nofile=4096 --fsize=1073741824 -- \
   bwrap --die-with-parent --new-session --unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts \
   --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --dir /tmp/wp01-scratch --bind "$scratch" /tmp/wp01-scratch \
   --clearenv --setenv PATH "$node_root/bin:/usr/bin:/bin" \

@@ -16,6 +16,8 @@ const contract = await import(pathToFileURL(resolve(source, "server/src/services
 const requireDb = createRequire(resolve(source, "packages/db/package.json"));
 const postgresModule = requireDb("postgres");
 const postgres = postgresModule.default ?? postgresModule;
+const { drizzle } = requireDb("drizzle-orm/postgres-js");
+const { sql: drizzleSql } = requireDb("drizzle-orm");
 const sql = postgres(databaseUrl, { max: 8, idle_timeout: 1 });
 const namespace = "plugin_m365_8b2a74e8fa";
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -25,20 +27,42 @@ const userId = "synthetic-human";
 const envelope = { algorithm: "aes-256-gcm" as const, keyVersion: "v1", iv: "synthetic-iv", ciphertext: "synthetic-ciphertext", authenticationTag: "synthetic-tag" };
 
 function database(client = sql) {
+  // Match the pinned host's postgres-js/Drizzle initialization (including JSON serializers).
+  // plugin-database.ts bindSql is private; reproduce its parameter-per-occurrence binding here.
+  // Core plugin registration/capability checks remain covered by the separate host lifecycle suite.
+  const hostDb = drizzle(client);
+  const bind = (statement: string, params: unknown[]) => {
+    if (params.length===0) return drizzleSql.raw(statement);
+    const chunks = [];
+    const seen = new Set<number>();
+    let cursor=0;
+    for (const match of statement.matchAll(/\$(\d+)/g)) {
+      const index=Number(match[1]);
+      assert(Number.isInteger(index) && index>=1 && index<=params.length,"host SQL parameter index invalid");
+      chunks.push(drizzleSql.raw(statement.slice(cursor,match.index)));
+      chunks.push(drizzleSql`${params[index-1]}`);
+      seen.add(index);
+      cursor=match.index!+match[0].length;
+    }
+    chunks.push(drizzleSql.raw(statement.slice(cursor)));
+    assert.equal(seen.size,params.length,"host SQL parameters must all be referenced");
+    return drizzleSql.join(chunks,drizzleSql.raw(""));
+  };
   return {
     namespace,
     async query<T>(statement: string, params: unknown[] = []): Promise<T[]> {
       contract.validatePluginRuntimeQuery(statement, namespace);
-      return Array.from(await client.unsafe(statement, params)) as T[];
+      return Array.from(await hostDb.execute(bind(statement,params))) as T[];
     },
     async execute(statement: string, params: unknown[] = []) {
       contract.validatePluginRuntimeExecute(statement, namespace);
       try {
-        const result = await client.unsafe(statement, params);
+        const result = await hostDb.execute(bind(statement,params));
         return { rowCount: Number(result.count ?? 0) };
       } catch (error) {
         // Synthetic disposable-database diagnostics only; production keeps fixed safe errors.
-        const diagnostic = error as { code?: string; routine?: string; constraint_name?: string };
+        const wrapped = error as { cause?: unknown; code?: string; routine?: string; constraint_name?: string };
+        const diagnostic = wrapped.code ? wrapped : (wrapped.cause ?? wrapped) as typeof wrapped;
         process.stderr.write(`${JSON.stringify({ probe: "governance-sql-failure", sqlState: diagnostic.code ?? "unknown",
           routine: diagnostic.routine ?? "unknown", constraint: diagnostic.constraint_name ?? null })}\n`);
         throw error;
@@ -89,6 +113,14 @@ const decision = (operation: OperationRecord) => ({ companyId: operation.company
 const reservation = (operation: OperationRecord) => ({ companyId: operation.companyId,operationId: operation.id,snapshotHash: operation.snapshotHash,executorNonce: randomUUID(),correlationId: randomUUID() });
 
 test("decision and executor CAS each have one winner with atomic actor/time/audit", async () => {
+  const bindingProbe = await database().query<{ identity: string; text_identity: string; structured: unknown; at: string; revision: string }>(
+    "SELECT $1::uuid AS identity,$1::text AS text_identity,$2::text::jsonb AS structured,$3::timestamptz AS at,$4::bigint AS revision",
+    [companyId,JSON.stringify([{ synthetic: true }]),"2026-11-19T00:00:00.000Z",123]);
+  assert.equal(bindingProbe[0]?.identity,companyId);
+  assert.equal(bindingProbe[0]?.text_identity,companyId);
+  assert.deepEqual(bindingProbe[0]?.structured,[{ synthetic: true }]);
+  assert.equal(new Date(bindingProbe[0]!.at).toISOString(),"2026-11-19T00:00:00.000Z");
+  assert.equal(Number(bindingProbe[0]?.revision),123);
   const op = await fixture();
   const listed = (await store.listOperations(companyId,100)).find((item) => item.id===op.id);
   assert(listed);

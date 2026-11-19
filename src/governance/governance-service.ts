@@ -122,8 +122,8 @@ export class GovernanceService {
       if (reserved.state !== "executing" || reserved.executorNonce !== executorNonce || reserved.snapshotHash !== record.snapshotHash || !reserved.decisionUserId) throw new GovernanceError("operation_invalidated");
       await this.#currentPolicy(reserved, reserved.decisionUserId);
       snapshot = await this.#snapshot(reserved);
-      // Key resolution may await an external backend; recheck the agent immediately before dispatch.
-      await this.#currentAgent(snapshot);
+      // Key resolution may await an external backend; recheck all live authority immediately before dispatch.
+      await this.#currentPolicy(reserved, reserved.decisionUserId);
     } catch {
       // No external call happened. Persist a definite failure; a failed write remains recoverable.
       if (!await this.#storage(() => this.#store.finish({ ...input, executorNonce, state: "failed", result: null, correlationId: this.#newId() }))) throw new GovernanceError("operation_invalidated");

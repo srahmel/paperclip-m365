@@ -30,7 +30,9 @@ for forbidden in /tmp /var/lib/postgresql/data; do
   if touch "$forbidden/.wp01-write-probe" 2>/dev/null; then fail "write unexpectedly succeeded outside scratch: $forbidden"; fi
 done
 [ "$(find /sys/class/net -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" = lo ] || fail "container has a non-loopback network interface"
-[ "$(ulimit -n)" -le 1024 ] || fail "open-file limit is not enforced"
+# The actual pinned host gateway has a broad concurrent ESM/tsx dependency import.
+# 1024 fails with EMFILE during that import; retain a finite, explicit 4096 limit.
+[ "$(ulimit -Sn)" -eq 4096 ] && [ "$(ulimit -Hn)" -eq 4096 ] || fail "expected 4096 soft/hard open-file limits"
 [ "$(ulimit -u)" -le 128 ] || fail "process limit is not enforced"
 
 node "$repo/experiments/wp00/verify-linux-contract.mjs"

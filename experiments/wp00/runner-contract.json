@@ -40,7 +40,7 @@
       "cpuSeconds": 150,
       "addressSpaceBytes": 3221225472,
       "processes": 128,
-      "openFiles": 1024,
+      "openFiles": 4096,
       "fileBytes": 1073741824
     }
   }

@@ -276,6 +276,20 @@ describe("GovernanceService", () => {
     expect(f.authorizeAgent).toHaveBeenCalledWith(identity.companyId, identity.agentId);
   });
 
+  it.each(["policy-revision", "approver-revoked", "expired", "connection-disconnected"])("rechecks %s after asynchronous key resolution before dispatch", async (fault) => {
+    const executor = vi.fn(async () => ({ state: "succeeded" as const, result: null }));
+    const f = fixture(executor); const op = await f.service.prepare(request); await f.approve(op.id, op.snapshotHash);
+    f.resolveKey.mockImplementationOnce(async () => {
+      if (fault === "policy-revision") f.policy.revision++;
+      if (fault === "approver-revoked") f.authorizeApprover.mockResolvedValue(false);
+      if (fault === "expired") f.setNow("2026-11-19T12:15:00Z");
+      if (fault === "connection-disconnected") f.policy.status = "disconnected";
+      return key;
+    });
+    const result = await f.service.execute({ companyId: identity.companyId, operationId: op.id });
+    expect(result.state).toBe("failed"); expect(result.result).toBeNull(); expect(executor).not.toHaveBeenCalled();
+  });
+
   it("requires current host authorization and defaults to deny", async () => {
     const executor = vi.fn(async () => ({ state: "succeeded" as const, result: null }));
     const f = fixture(executor); const op = await f.service.prepare(request);
