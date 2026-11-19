@@ -26,10 +26,13 @@ const requiredFiles = [
   "dist/manifest.js",
   "dist/ui/index.js",
   "dist/worker.js",
+  "dist/watchdog.js",
   "migrations/001_scaffold_metadata.sql",
   "migrations/002_auth_connections.sql",
   "migrations/003_atomic_cache_state.sql",
   "migrations/004_governed_operations.sql",
+  "migrations/005_private_operation_results.sql",
+  "migrations/006_telemetry.sql",
   "package.json",
 ];
 for (const requiredFile of requiredFiles) {
@@ -57,6 +60,8 @@ const uiModule = await import(pathToFileURL(resolve(projectRoot, "dist/ui/index.
 assert.equal(manifestModule.default.id, "srahmel.m365", "packed manifest entrypoint has the wrong plugin ID");
 assert(workerModule.default?.definition, "packed worker entrypoint has no plugin definition");
 assert.equal(typeof uiModule.SettingsPage, "function", "packed UI entrypoint has no SettingsPage export");
+const watchdogModule = await import(pathToFileURL(resolve(projectRoot, "dist/watchdog.js")));
+assert.equal(typeof watchdogModule.PluginWatchdog, "function", "packed independent watchdog is unavailable");
 
 console.log(JSON.stringify({
   check: "pack",

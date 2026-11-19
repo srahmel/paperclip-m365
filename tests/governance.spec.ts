@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { GovernanceService, type GovernanceExecutor } from "../src/governance/governance-service.js";
+import { GovernanceService, governanceFailureSignal, type GovernanceExecutor, type GovernanceObserver } from "../src/governance/governance-service.js";
+import { GovernanceError } from "../src/governance/types.js";
+import { MicrosoftAuthError } from "../src/auth/connection-manager.js";
 import { canonicalJson, validatePolicy, MAX_SNAPSHOT_BYTES } from "../src/governance/policy.js";
 import type { AgentIdentity, ConnectionPolicy, GovernanceStore, OperationRecord } from "../src/governance/types.js";
 
@@ -7,7 +9,7 @@ const identity: AgentIdentity = { companyId: "company-a", agentId: "agent-a", ru
 const key = { value: Buffer.alloc(32, 3).toString("base64"), version: "v1" };
 const request = { identity, connectionId: "connection-a", operationType: "mail-send" as const, resource: "mailbox-a", payload: { subject: "Synthetic message", recipients: ["synthetic@example.test"] } };
 
-function fixture(executor?: GovernanceExecutor) {
+function fixture(executor?: GovernanceExecutor, observe?: GovernanceObserver, retention: Pick<ConstructorParameters<typeof GovernanceService>[0], "privateResultTtlMs" | "metadataTtlMs"> = {}) {
   let now = new Date("2026-11-19T12:00:00Z");
   let nextId = 0;
   let auditFails = false;
@@ -21,7 +23,7 @@ function fixture(executor?: GovernanceExecutor) {
   const live = (record: OperationRecord | undefined) => !!record && record.companyId === policy.companyId && record.connectionId === policy.connectionId &&
     record.policyRevision === policy.revision && record.connectionGeneration === policy.generation && policy.status === "connected" &&
     record.tenantId === policy.tenantId && record.homeAccountId === policy.homeAccountId &&
-    Date.parse(record.expiresAt) > now.getTime() && policy.bindings.some((binding) => binding.agentId === record.agentId && binding.rules.some((rule) => rule.operationType === record.operationType && (rule.resources.includes(record.resource) || rule.resources.includes("*"))));
+    Date.parse(record.expiresAt) > now.getTime() && policy.bindings.some((binding) => binding.agentId === record.agentId && binding.rules.some((rule) => rule.operationType === record.operationType && (rule.resources.includes(record.resource!) || rule.resources.includes("*"))));
   const audit = () => { if (auditFails) throw new Error("private database audit failure"); };
   const store: GovernanceStore = {
     async getPolicy(company, connection) { return company === policy.companyId && connection === policy.connectionId ? structuredClone(policy) : null; },
@@ -47,16 +49,35 @@ function fixture(executor?: GovernanceExecutor) {
     async finish(input) {
       const record = operations.get(input.operationId);
       if (!record || record.companyId !== input.companyId || record.state !== "executing" || record.executorNonce !== input.executorNonce) return false;
-      audit(); record.state = input.state; record.result = input.result; record.completedAt = now.toISOString();
+      audit(); record.state = input.state; record.result = input.result; record.privateResultEnvelope=input.privateResultEnvelope ?? null; record.privateResultExpiresAt=input.privateResultExpiresAt ?? null; record.completedAt = now.toISOString();
       record.audit.push({ state: input.state, actorId: "executor", at: now.toISOString(), correlationId: input.correlationId }); return true;
     },
+    async invalidate(input) {
+      const record=operations.get(input.operationId);
+      if (!record || record.companyId!==input.companyId || !["pending","approved"].includes(record.state)) return false;
+      audit();record.state="invalidated";record.envelope=null;record.decisionUserId=input.userId;record.decidedAt=now.toISOString();
+      record.audit.push({state:"invalidated",actorId:input.userId,at:now.toISOString(),correlationId:input.correlationId});return true;
+    },
     async recoverUncertain(company, olderThan) { let count = 0; for (const record of operations.values()) if (record.companyId === company && record.state === "executing" && record.reservedAt! < olderThan) { audit(); record.state = "unknown"; count++; } return count; },
-    async purgeExpired(company) { let count = 0; for (const record of operations.values()) if (record.companyId === company && Date.parse(record.expiresAt) <= now.getTime() && record.state !== "executing") { record.envelope = null; if (record.state === "pending") record.state = "expired"; count++; } return count; },
+    async purgeExpired(company) {
+      let count=0;
+      for (const record of operations.values()) if (record.companyId===company && record.state!=="executing") {
+        let changed=false;
+        if (record.envelope && Date.parse(record.expiresAt)<=now.getTime()) {record.envelope=null;if(record.state==="pending")record.state="expired";changed=true;}
+        if(record.privateResultExpiresAt && Date.parse(record.privateResultExpiresAt)<=now.getTime()){record.privateResultEnvelope=null;record.privateResultExpiresAt=null;changed=true;}
+        if(!record.metadataPurgedAt && Date.parse(record.metadataPurgeAfter)<=now.getTime()){
+          for(const field of ["connectionId","agentId","runId","projectId","tenantId","homeAccountId","resource","policyRevision","connectionGeneration","decisionUserId"] as const)record[field]=null;
+          record.envelope=null;record.privateResultEnvelope=null;record.privateResultExpiresAt=null;record.result=null;record.audit=[];record.metadataPurgedAt=now.toISOString();changed=true;
+        }
+        if(changed)count++;
+      }
+      return count;
+    },
   };
   const resolveKey = vi.fn(async (_companyId: string) => key);
   const authorizeAgent = vi.fn(async (_company: string, _agent: string) => true);
   const authorizeApprover = vi.fn(async (_company: string, _user: string) => true);
-  const service = new GovernanceService({ store, resolveKey, executor, authorizeAgent, authorizeApprover, now: () => now, newId: () => `id-${++nextId}` });
+  const service = new GovernanceService({ store, resolveKey, executor, authorizeAgent, authorizeApprover, observe, now: () => now, newId: () => `id-${++nextId}`, ...retention });
   const approve = async (id: string, snapshotHash: string) => service.decide({ companyId: identity.companyId, operationId: id, userId: "user-a", snapshotHash, approve: true });
   return { service, store, operations, policy, resolveKey, authorizeAgent, authorizeApprover, approve, setNow: (value: string) => { now = new Date(value); }, failAudit: () => { auditFails = true; } };
 }
@@ -81,8 +102,160 @@ describe("governance canonical JSON", () => {
 });
 
 describe("GovernanceService", () => {
+  it("observes only committed transitions with approval/execution durations and no payload", async () => {
+    const observe = vi.fn();
+    const f = fixture(async () => { f.setNow("2026-11-19T12:10:05Z"); return { state: "succeeded", result: null }; }, observe);
+    observe.mockImplementation(async (_company, event) => {
+      const record = [...f.operations.values()][0]!;
+      expect(record.state).toBe(event.outcome);
+    });
+    const op = await f.service.prepare(request);
+    expect(observe).not.toHaveBeenCalled();
+    f.setNow("2026-11-19T12:10:00Z"); await f.approve(op.id, op.snapshotHash);
+    f.setNow("2026-11-19T12:10:03Z");
+    await f.service.execute({ companyId: identity.companyId, operationId: op.id });
+    expect(observe.mock.calls).toEqual([
+      [identity.companyId, { kind: "operation", operationType: "mail-send", outcome: "approved", durationMs: 600000 }],
+      [identity.companyId, { kind: "operation", operationType: "mail-send", outcome: "executing", durationMs: 603000, approvalDelayMs: 3000 }],
+      [identity.companyId, { kind: "operation", operationType: "mail-send", outcome: "succeeded", durationMs: 2000 }],
+    ]);
+    expect(JSON.stringify(observe.mock.calls)).not.toMatch(/Synthetic|recipients|mailbox|user-a|snapshot/);
+  });
+  it.each(["succeeded", "failed", "unknown"] as const)("observer failure cannot mask committed %s or repeat an executor", async (state) => {
+    const observe = vi.fn().mockRejectedValue(new Error("private-observer-error"));
+    const executor = vi.fn(async () => ({ state, result: null })); const f = fixture(executor, observe);
+    const op = await f.service.prepare(request); await expect(f.approve(op.id, op.snapshotHash)).resolves.toMatchObject({ state: "approved" });
+    await expect(f.service.execute({ companyId: identity.companyId, operationId: op.id })).resolves.toMatchObject({ state });
+    await expect(f.service.execute({ companyId: identity.companyId, operationId: op.id })).rejects.toThrow("operation_state_invalid");
+    expect(executor).toHaveBeenCalledOnce(); expect(observe).toHaveBeenCalledTimes(3);
+  });
+  it("does not emit approvals on failed persistence, and emits definite failure for a key loss before dispatch", async () => {
+    const observe = vi.fn().mockResolvedValue(undefined); const execute = vi.fn(async () => ({ state: "succeeded" as const, result: null }));
+    const f = fixture(execute, observe); const op = await f.service.prepare(request); await f.approve(op.id, op.snapshotHash);
+    f.resolveKey.mockRejectedValue(new Error("private-key-error"));
+    expect(await f.service.execute({ companyId: identity.companyId, operationId: op.id })).toMatchObject({ state: "failed" });
+    expect(execute).not.toHaveBeenCalled();
+    expect(observe.mock.calls.map((call) => call[1])).toContainEqual({ kind: "fault", errorClass: "secret", component: "executor" });
+    expect(observe.mock.calls.at(-1)?.[1]).toMatchObject({ kind: "operation", outcome: "failed" });
+    const blocked = fixture(undefined, observe); const pending = await blocked.service.prepare(request); observe.mockClear(); blocked.failAudit();
+    await expect(blocked.approve(pending.id, pending.snapshotHash)).rejects.toThrow("storage_unavailable"); expect(observe).not.toHaveBeenCalled();
+  });
+  it("classifies only typed fixed error codes and never copies exception details", () => {
+    for (const [code, kind, errorClass] of [["permission_denied", "denial", "authorization"], ["payload_too_large", "denial", "size"], ["key_unavailable", "fault", "secret"], ["storage_unavailable", "fault", "database"]]) {
+      expect(governanceFailureSignal(new GovernanceError(code!), "action")).toEqual({ kind, errorClass, component: "action" });
+    }
+    expect(governanceFailureSignal(new MicrosoftAuthError("consent_revoked"), "executor")).toEqual({ kind: "fault", errorClass: "token", component: "executor" });
+    expect(governanceFailureSignal(new Error("private-token-canary"), "action")).toBeNull();
+    expect(governanceFailureSignal(new GovernanceError("private-code-canary"), "action")).toBeNull();
+  });
+  it("encrypts private result handles and returns them only to the live requesting agent/project", async () => {
+    const f=fixture(async()=>({state:"succeeded",result:{schemaVersion:1,code:"created",resourceKind:"mail",errorCode:null},privateResult:{resourceId:"private-canary-id",etag:'W/"private-canary-etag"'}}));
+    const op=await f.service.prepare(request);await f.approve(op.id,op.snapshotHash);
+    const complete=await f.service.execute({companyId:identity.companyId,operationId:op.id});
+    expect(JSON.stringify(complete)).not.toContain("private-canary");
+    expect(JSON.stringify(await f.service.list({companyId:identity.companyId}))).not.toContain("private-canary");
+    expect(JSON.stringify(await f.service.status({identity,operationId:op.id}))).not.toContain("private-canary");
+    expect(JSON.stringify(f.operations.get(op.id))).not.toContain("private-canary");
+    const reopened=new GovernanceService({store:f.store,resolveKey:f.resolveKey,authorizeAgent:f.authorizeAgent,authorizeApprover:f.authorizeApprover,now:()=>new Date("2026-11-19T12:01:00Z")});
+    await expect(reopened.getResult({identity:{...identity,runId:"fresh-run"},operationId:op.id})).resolves.toMatchObject({privateResult:{resourceId:"private-canary-id",etag:'W/"private-canary-etag"'}});
+    for(const changed of [{companyId:"foreign"},{agentId:"other-agent"},{projectId:"other-project"}]) {
+      await expect(reopened.getResult({identity:{...identity,...changed},operationId:op.id})).rejects.toThrow("operation_not_found");
+    }
+    f.authorizeAgent.mockResolvedValue(false);
+    await expect(reopened.getResult({identity,operationId:op.id})).rejects.toThrow("agent_unavailable");
+  });
+
+  it.each([
+    {result:{schemaVersion:1,code:"created",resourceKind:"mail",errorCode:null,body:"private-body-canary"}},
+    {result:{schemaVersion:1,code:"private-code-canary",resourceKind:"mail",errorCode:null}},
+    {result:null,privateResult:{resourceId:"https://private.example/file"}},
+    {result:null,privateResult:{resourceId:"id",downloadUrl:"https://private.example/file"}},
+    {result:null,privateResult:{etag:'"https://private.example/file"'}},
+  ])("rejects uncurated executor output without persisting private canaries", async (extra) => {
+    const f=fixture((async()=>({state:"succeeded",...extra})) as unknown as GovernanceExecutor);
+    const op=await f.service.prepare(request);await f.approve(op.id,op.snapshotHash);
+    const complete=await f.service.execute({companyId:identity.companyId,operationId:op.id});
+    expect(complete.state).toBe("unknown");expect(complete.result).toBeNull();
+    expect(JSON.stringify(f.operations.get(op.id))).not.toContain("private-");
+    expect(f.operations.get(op.id)?.privateResultEnvelope).toBeNull();
+  });
+
+  it("bounds private-result lifetime by the shorter metadata lifetime", async () => {
+    const f = fixture(async () => ({ state: "succeeded", result: null, privateResult: { resourceId: "private-id" } }), undefined,
+      { privateResultTtlMs: 7 * 86400000, metadataTtlMs: 86400000 });
+    const op = await f.service.prepare(request); await f.approve(op.id, op.snapshotHash);
+    await f.service.execute({ companyId: identity.companyId, operationId: op.id });
+    expect(f.operations.get(op.id)!.privateResultExpiresAt).toBe("2026-11-20T12:00:00.000Z");
+    f.setNow("2026-11-20T12:00:00Z");
+    await expect(f.service.getResult({ identity, operationId: op.id })).rejects.toThrow("result_unavailable");
+  });
+
+  it("reloads the stored result after key resolution and rejects a concurrently redacted tombstone", async () => {
+    const f = fixture(async () => ({ state: "succeeded", result: null, privateResult: { resourceId: "private-id" } }), undefined,
+      { privateResultTtlMs: 7 * 86400000, metadataTtlMs: 86400000 });
+    const op = await f.service.prepare(request); await f.approve(op.id, op.snapshotHash);
+    await f.service.execute({ companyId: identity.companyId, operationId: op.id });
+    const reads = vi.spyOn(f.store, "findOperation");
+    f.resolveKey.mockImplementationOnce(async () => {
+      f.setNow("2026-11-20T12:00:00Z"); await f.service.purge(identity.companyId); return key;
+    });
+    await expect(f.service.getResult({ identity, operationId: op.id })).rejects.toThrow("operation_not_found");
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(f.operations.get(op.id)!.metadataPurgedAt).not.toBeNull();
+  });
+
+  it("rejects private result removal or replacement while the key is being resolved", async () => {
+    const f = fixture(async () => ({ state: "succeeded", result: null, privateResult: { resourceId: "private-id" } }));
+    const op = await f.service.prepare(request); await f.approve(op.id, op.snapshotHash);
+    await f.service.execute({ companyId: identity.companyId, operationId: op.id });
+    f.resolveKey.mockImplementationOnce(async () => { f.operations.get(op.id)!.privateResultEnvelope = null; return key; });
+    await expect(f.service.getResult({ identity, operationId: op.id })).rejects.toThrow("result_unavailable");
+  });
+
+  it("physically purges private results and later redacts metadata without replaying tombstones", async () => {
+    const f=fixture(async()=>({state:"unknown",result:{schemaVersion:1,code:"unknown",resourceKind:"mail",errorCode:"unknown"},privateResult:{resourceId:"private-id"}}));
+    const op=await f.service.prepare(request);await f.approve(op.id,op.snapshotHash);
+    await f.service.execute({companyId:identity.companyId,operationId:op.id});
+    const nonce=f.operations.get(op.id)!.executorNonce;
+    f.setNow("2026-11-20T12:00:00Z");
+    await expect(f.service.getResult({identity,operationId:op.id})).rejects.toThrow("result_unavailable");
+    await f.service.purge(identity.companyId);
+    expect(f.operations.get(op.id)?.privateResultEnvelope).toBeNull();
+    f.setNow("2026-12-20T12:00:00Z");await f.service.purge(identity.companyId);
+    const tombstone=f.operations.get(op.id)!;
+    expect(tombstone).toMatchObject({id:op.id,state:"unknown",snapshotHash:op.snapshotHash,executorNonce:nonce,agentId:null,resource:null,audit:[],result:null,decisionUserId:null});
+    await expect(f.service.execute({companyId:identity.companyId,operationId:op.id})).rejects.toThrow("operation_not_found");
+    await expect(f.service.getResult({identity,operationId:op.id})).rejects.toThrow("operation_not_found");
+    expect(await f.service.list({companyId:identity.companyId})).toHaveLength(1);
+  });
+
+  it("invalidates pending or approved requests before key rotation without decrypting and never resets executing/unknown", async () => {
+    const f=fixture(async()=>({state:"unknown",result:null}));
+    const pending=await f.service.prepare(request);const approved=await f.service.prepare(request);const unknown=await f.service.prepare(request);
+    await f.approve(approved.id,approved.snapshotHash);await f.approve(unknown.id,unknown.snapshotHash);
+    await f.service.execute({companyId:identity.companyId,operationId:unknown.id});
+    f.resolveKey.mockRejectedValue(new Error("key-removed"));
+    for(const op of [pending,approved]) {
+      await expect(f.service.invalidate({companyId:identity.companyId,operationId:op.id,userId:"user-a"})).resolves.toMatchObject({state:"invalidated"});
+      expect(f.operations.get(op.id)?.envelope).toBeNull();
+      await expect(f.service.execute({companyId:identity.companyId,operationId:op.id})).rejects.toThrow("operation_state_invalid");
+    }
+    await expect(f.service.invalidate({companyId:identity.companyId,operationId:unknown.id,userId:"user-a"})).rejects.toThrow("operation_state_invalid");
+    f.operations.get(unknown.id)!.state="executing";
+    await expect(f.service.invalidate({companyId:identity.companyId,operationId:unknown.id,userId:"user-a"})).rejects.toThrow("operation_state_invalid");
+    f.authorizeApprover.mockResolvedValue(false);
+    await expect(f.service.invalidate({companyId:identity.companyId,operationId:pending.id,userId:"user-a"})).rejects.toThrow("approval_forbidden");
+  });
+
+  it("bounds configurable technical retention periods", () => {
+    const f=fixture();
+    for(const options of [{privateResultTtlMs:3599999},{privateResultTtlMs:8*86400000},{metadataTtlMs:86399999},{metadataTtlMs:91*86400000}]) {
+      expect(()=>new GovernanceService({store:f.store,resolveKey:f.resolveKey,...options})).toThrow("retention_invalid");
+    }
+    expect(()=>new GovernanceService({store:f.store,resolveKey:f.resolveKey,privateResultTtlMs:3600000,metadataTtlMs:86400000})).not.toThrow();
+  });
   it("stores encrypted immutable snapshots and executes exactly the approved content", async () => {
-    const executor = vi.fn(async () => ({ state: "succeeded" as const, result: { id: "external-id" } }));
+    const executor = vi.fn(async () => ({ state: "succeeded" as const, result: { schemaVersion: 1 as const,code: "created" as const,resourceKind: "mail" as const,errorCode: null },privateResult: { resourceId: "external-id" } }));
     const f = fixture(executor);
     const payload = { subject: "original" };
     const prepared = await f.service.prepare({ ...request, payload });
@@ -337,7 +510,7 @@ describe("GovernanceService", () => {
   });
 
   it("sanitizes oversized executor results into unknown outcomes", async () => {
-    const f = fixture(async () => ({ state: "succeeded", result: "x".repeat(65_536) }));
+    const f = fixture((async () => ({ state: "succeeded", result: "x".repeat(65_536) })) as unknown as GovernanceExecutor);
     const op = await f.service.prepare(request); await f.approve(op.id, op.snapshotHash);
     const result = await f.service.execute({ companyId: identity.companyId, operationId: op.id });
     expect(result.state).toBe("unknown"); expect(result.result).toBeNull();

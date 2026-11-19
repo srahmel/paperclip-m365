@@ -66,9 +66,9 @@ export class SqlGovernanceStore implements GovernanceStore {
     const wildcard = JSON.stringify([{ agentId: record.agentId, rules: [{ operationType: record.operationType, resources: ["*"] }] }]);
     return await this.#execute(`INSERT INTO ${this.#operations} (
       company_id,id,connection_id,agent_id,run_id,project_id,operation_type,resource,policy_revision,
-      connection_generation,snapshot_hash,snapshot_envelope,expires_at,created_at,state,audit,tenant_id,home_account_id)
+      connection_generation,snapshot_hash,snapshot_envelope,expires_at,created_at,state,audit,tenant_id,home_account_id,metadata_purge_after)
       SELECT $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7,$8,$9,$10,$11,$12::text::jsonb,$13::timestamptz,$14::timestamptz,'pending',
-        jsonb_build_array(jsonb_build_object('state','pending','actorId',$4::text,'at',now(),'correlationId',$2::text)),$17::uuid,$18::text
+        jsonb_build_array(jsonb_build_object('state','pending','actorId',$4::text,'at',now(),'correlationId',$2::text)),$17::uuid,$18::text,$19::timestamptz
       FROM ${this.#connections} AS authority
       WHERE authority.company_id=$1 AND authority.id=$3 AND authority.status='connected'
         AND authority.policy_revision=$9 AND authority.generation=$10
@@ -77,7 +77,7 @@ export class SqlGovernanceStore implements GovernanceStore {
         AND (authority.policy_bindings @> $15::text::jsonb OR authority.policy_bindings @> $16::text::jsonb)
       FOR UPDATE OF authority`, [record.companyId,record.id,record.connectionId,record.agentId,record.runId,record.projectId,
       record.operationType,record.resource,record.policyRevision,record.connectionGeneration,record.snapshotHash,
-      JSON.stringify(record.envelope),record.expiresAt,record.createdAt,permission,wildcard,record.tenantId,record.homeAccountId]) === 1;
+      JSON.stringify(record.envelope),record.expiresAt,record.createdAt,permission,wildcard,record.tenantId,record.homeAccountId,record.metadataPurgeAfter]) === 1;
   }
 
   async findOperation(companyId: string, operationId: string): Promise<OperationRecord | null> {
@@ -89,15 +89,16 @@ export class SqlGovernanceStore implements GovernanceStore {
     return (await this.#query(`SELECT id,company_id,connection_id,agent_id,run_id,project_id,
       operation_type,resource,policy_revision,connection_generation,tenant_id,home_account_id,
       snapshot_hash,NULL AS snapshot_envelope,expires_at,created_at,state,decision_user_id,decided_at,
-      executor_nonce,reserved_at,completed_at,result,audit
+      executor_nonce,reserved_at,completed_at,result,audit,NULL AS private_result_envelope,private_result_expires_at,metadata_purge_after,metadata_purged_at
       FROM ${this.#operations} WHERE company_id=$1 ORDER BY created_at DESC,id LIMIT $2`, [companyId,limit])).map(materialize);
   }
 
   async decide(input: Parameters<GovernanceStore["decide"]>[0]): Promise<boolean> {
     const state = input.approve ? "approved" : "rejected";
     return await this.#execute(`UPDATE ${this.#operations} AS operation SET state=$5,decision_user_id=$4,decided_at=now(),
+      metadata_purge_after=CASE WHEN $5::text='rejected' THEN now()+(metadata_purge_after-created_at) ELSE metadata_purge_after END,
       audit=audit || jsonb_build_array(jsonb_build_object('state',$5::text,'actorId',$4::text,'at',now(),'correlationId',$6::text))
-      WHERE company_id=$1 AND id=$2 AND snapshot_hash=$3 AND state='pending' AND expires_at>now()
+      WHERE company_id=$1 AND id=$2 AND snapshot_hash=$3 AND state='pending' AND expires_at>now() AND metadata_purged_at IS NULL
         AND snapshot_envelope IS NOT NULL AND ${this.#authority("AND authority.policy_approver_user_ids ? $4::text")}`,
     [input.companyId,input.operationId,input.snapshotHash,input.userId,state,input.correlationId]) === 1;
   }
@@ -105,46 +106,69 @@ export class SqlGovernanceStore implements GovernanceStore {
   async reserve(input: Parameters<GovernanceStore["reserve"]>[0]): Promise<boolean> {
     return await this.#execute(`UPDATE ${this.#operations} AS operation SET state='executing',executor_nonce=$4,reserved_at=now(),
       audit=audit || jsonb_build_array(jsonb_build_object('state','executing','actorId','executor','at',now(),'correlationId',$5::text))
-      WHERE company_id=$1 AND id=$2 AND snapshot_hash=$3 AND state='approved' AND expires_at>now()
+      WHERE company_id=$1 AND id=$2 AND snapshot_hash=$3 AND state='approved' AND expires_at>now() AND metadata_purged_at IS NULL
         AND snapshot_envelope IS NOT NULL AND decision_user_id IS NOT NULL
         AND ${this.#authority("AND authority.policy_approver_user_ids ? operation.decision_user_id")}`,
     [input.companyId,input.operationId,input.snapshotHash,input.executorNonce,input.correlationId]) === 1;
   }
 
   async finish(input: Parameters<GovernanceStore["finish"]>[0]): Promise<boolean> {
-    return await this.#execute(`UPDATE ${this.#operations} SET state=$4,result=$5::text::jsonb,completed_at=now(),
+    return await this.#execute(`UPDATE ${this.#operations} SET state=$4,result=$5::text::jsonb,private_result_envelope=$7::text::jsonb,private_result_expires_at=$8::timestamptz,completed_at=now(),metadata_purge_after=now()+(metadata_purge_after-created_at),
       audit=audit || jsonb_build_array(jsonb_build_object('state',$4::text,'actorId','executor','at',now(),'correlationId',$6::text))
       WHERE company_id=$1 AND id=$2 AND state='executing' AND executor_nonce=$3
         AND $4::text IN ('succeeded','failed','unknown')`,
-    [input.companyId,input.operationId,input.executorNonce,input.state,JSON.stringify(input.result),input.correlationId]) === 1;
+    [input.companyId,input.operationId,input.executorNonce,input.state,JSON.stringify(input.result),input.correlationId,input.privateResultEnvelope ? JSON.stringify(input.privateResultEnvelope) : null,input.privateResultExpiresAt ?? null]) === 1;
+  }
+
+  async invalidate(input: Parameters<GovernanceStore["invalidate"]>[0]): Promise<boolean> {
+    return await this.#execute(`UPDATE ${this.#operations} SET state='invalidated',snapshot_envelope=NULL,
+      decision_user_id=$3,decided_at=now(),completed_at=now(),metadata_purge_after=now()+(metadata_purge_after-created_at),
+      audit=audit || jsonb_build_array(jsonb_build_object('state','invalidated','actorId',$3::text,'at',now(),'correlationId',$4::text))
+      WHERE company_id=$1 AND id=$2 AND state IN ('pending','approved') AND metadata_purged_at IS NULL`,
+      [input.companyId,input.operationId,input.userId,input.correlationId])===1;
   }
 
   async recoverUncertain(companyId: string, olderThan: string): Promise<number> {
-    return this.#execute(`UPDATE ${this.#operations} SET state='unknown',completed_at=now(),
+    return this.#execute(`UPDATE ${this.#operations} SET state='unknown',completed_at=now(),metadata_purge_after=now()+(metadata_purge_after-created_at),
       audit=audit || jsonb_build_array(jsonb_build_object('state','unknown','actorId','recovery','at',now(),'correlationId',executor_nonce::text))
       WHERE company_id=$1 AND state='executing' AND reserved_at<$2::timestamptz`, [companyId,olderThan]);
   }
 
   async purgeExpired(companyId: string): Promise<number> {
-    return this.#execute(`UPDATE ${this.#operations} SET snapshot_envelope=NULL,
-      audit=CASE WHEN state='pending' THEN audit || jsonb_build_array(jsonb_build_object(
+    const metadataDue = "metadata_purged_at IS NULL AND (CASE WHEN state='pending' THEN expires_at+(metadata_purge_after-created_at) ELSE metadata_purge_after END)<=now() AND (state NOT IN ('pending','approved') OR expires_at<=now())";
+    const snapshotDue = "expires_at<=now()";
+    const privateDue = "private_result_expires_at<=now()";
+    const redacted = ["connection_id","agent_id","run_id","project_id","tenant_id","home_account_id","resource","policy_revision","connection_generation","decision_user_id"]
+      .map((column)=>`${column}=CASE WHEN ${metadataDue} THEN NULL ELSE ${column} END`).join(",");
+    return this.#execute(`UPDATE ${this.#operations} SET
+      snapshot_envelope=CASE WHEN ${snapshotDue} OR (${metadataDue}) THEN NULL ELSE snapshot_envelope END,
+      private_result_envelope=CASE WHEN ${privateDue} OR (${metadataDue}) THEN NULL ELSE private_result_envelope END,
+      private_result_expires_at=CASE WHEN ${privateDue} OR (${metadataDue}) THEN NULL ELSE private_result_expires_at END,
+      result=CASE WHEN ${metadataDue} THEN NULL ELSE result END,
+      audit=CASE WHEN ${metadataDue} THEN '[]'::jsonb WHEN state='pending' AND ${snapshotDue} THEN audit || jsonb_build_array(jsonb_build_object(
         'state','expired','actorId','retention','at',now(),'correlationId',id::text)) ELSE audit END,
-      state=CASE WHEN state='pending' THEN 'expired' ELSE state END
-      WHERE company_id=$1 AND expires_at<=now() AND snapshot_envelope IS NOT NULL
-        AND state<>'executing'`, [companyId]);
+      metadata_purge_after=CASE WHEN state='pending' AND expires_at<=now() THEN expires_at+(metadata_purge_after-created_at) ELSE metadata_purge_after END,
+      metadata_purged_at=CASE WHEN ${metadataDue} THEN now() ELSE metadata_purged_at END,
+      ${redacted},
+      state=CASE WHEN state='pending' AND ${snapshotDue} THEN 'expired' ELSE state END
+      WHERE company_id=$1 AND state<>'executing' AND
+        ((snapshot_envelope IS NOT NULL AND ${snapshotDue}) OR (private_result_envelope IS NOT NULL AND ${privateDue}) OR (${metadataDue}))`, [companyId]);
   }
+
 }
 
 function materialize(row: Row): OperationRecord {
   const date = (value: unknown) => value === null ? null : new Date(value as string | Date).toISOString();
   return {
-    id: String(row.id),companyId: String(row.company_id),connectionId: String(row.connection_id),agentId: String(row.agent_id),
-    runId: String(row.run_id),projectId: String(row.project_id),operationType: row.operation_type as OperationRecord["operationType"],
-    resource: String(row.resource),policyRevision: Number(row.policy_revision),connectionGeneration: Number(row.connection_generation),
-    tenantId: String(row.tenant_id),homeAccountId: String(row.home_account_id),
+    id: String(row.id),companyId: String(row.company_id),connectionId: row.connection_id as string | null,agentId: row.agent_id as string | null,
+    runId: row.run_id as string | null,projectId: row.project_id as string | null,operationType: row.operation_type as OperationRecord["operationType"],
+    resource: row.resource as string | null,policyRevision: row.policy_revision===null ? null : Number(row.policy_revision),connectionGeneration: row.connection_generation===null ? null : Number(row.connection_generation),
+    tenantId: row.tenant_id as string | null,homeAccountId: row.home_account_id as string | null,
     snapshotHash: String(row.snapshot_hash),envelope: row.snapshot_envelope as OperationRecord["envelope"],expiresAt: date(row.expires_at)!,
     createdAt: date(row.created_at)!,state: row.state as OperationRecord["state"],decisionUserId: row.decision_user_id as string | null,
     decidedAt: date(row.decided_at),executorNonce: row.executor_nonce as string | null,reservedAt: date(row.reserved_at),
+    privateResultEnvelope: row.private_result_envelope as OperationRecord["privateResultEnvelope"],privateResultExpiresAt: date(row.private_result_expires_at),
+    metadataPurgeAfter: date(row.metadata_purge_after)!,metadataPurgedAt: date(row.metadata_purged_at),
     completedAt: date(row.completed_at),result: row.result as OperationRecord["result"],audit: row.audit as OperationRecord["audit"],
   };
 }

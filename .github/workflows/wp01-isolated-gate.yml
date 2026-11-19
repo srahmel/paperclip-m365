@@ -3,7 +3,7 @@ name: WP01 isolated reproducibility gate
 on:
   workflow_dispatch:
   push:
-    branches: [hum-282-wp01a-reproducible-pin, hum-323-wp01-scaffold, hum-344-wp02-auth-connections, codex/m365-wp03-governed-operations]
+    branches: [hum-282-wp01a-reproducible-pin, hum-323-wp01-scaffold, hum-344-wp02-auth-connections, codex/m365-wp03-governed-operations, codex/m365-wp04-graph-telemetry]
     paths:
       - ".github/workflows/wp01-isolated-gate.yml"
       - ".github/workflows/wp01-plugin-package.yml"

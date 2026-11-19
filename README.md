@@ -38,9 +38,10 @@ only; secrets belong in the Paperclip Secret Store.
 
 ## Planned capabilities
 
-The remaining work packages add the Microsoft Graph transport and mail, calendar,
-and OneDrive operations. WP03 establishes their permission and approval boundaries;
-it does not enable a production Graph mutation handler.
+WP04 adds the internal Graph transport, content-free monitoring, private-result
+retention and independent watchdog foundations. The remaining work packages add
+mail, calendar and OneDrive domain operations; no production Graph mutation
+handler is enabled yet.
 
 | Area | Planned first-version scope |
 | --- | --- |
@@ -59,6 +60,15 @@ it does not enable a production Graph mutation handler.
 - [ADR 0001: verified host contracts](docs/decisions/0001-paperclip-runtime-contracts.md)
 - [Reproducible host contract experiment](experiments/wp00/README.md)
 - [Scaffold and installation evidence](docs/wp01-scaffold.md)
+- [Transport, monitoring and retention](docs/wp04-transport-monitoring.md)
+- [Operations runbook v1](docs/runbooks/m365-operations.md)
+
+The package includes `dist/watchdog.js` for an independent supervisor. Import
+`PluginWatchdog` and invoke `checkOnce()` from an external scheduler with an
+authenticated, bounded host HTTP adapter and an independent alarm sink. Do not
+run this supervisor inside the plugin worker. Construction starts no network
+requests; external credentials, scheduling and sink configuration are deployment
+responsibilities, and have not been enabled by this development package.
 
 The integration uses TypeScript, the official Paperclip Plugin SDK, Microsoft
 Graph v1.0, Entra ID, and MSAL. Credentials belong in the host Secret Store.

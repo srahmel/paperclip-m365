@@ -75,7 +75,7 @@ const store = new SqlGovernanceStore(database());
 before(async () => {
   await sql.unsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
   await sql.unsafe(`CREATE SCHEMA "${namespace}"`);
-  for (const migration of ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql"]) {
+  for (const migration of ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql", "005_private_operation_results.sql"]) {
     const contents = await readFile(resolve(root, "migrations", migration), "utf8");
     for (const statement of contents.split(";").map((part) => part.trim()).filter(Boolean)) {
       contract.validatePluginMigrationStatement(statement, namespace);
@@ -104,7 +104,7 @@ async function fixture(shareable = false): Promise<OperationRecord> {
     operationType: "mail-send",resource: "folder-a",policyRevision: 1,connectionGeneration: 1,
     tenantId,homeAccountId,
     snapshotHash: "a".repeat(64),envelope,createdAt: new Date(now-1000).toISOString(),expiresAt: new Date(now+3600000).toISOString(),
-    state: "pending",decisionUserId: null,decidedAt: null,executorNonce: null,reservedAt: null,completedAt: null,result: null,audit: [],
+    state: "pending",decisionUserId: null,decidedAt: null,executorNonce: null,reservedAt: null,completedAt: null,result: null,audit: [],privateResultEnvelope: null,privateResultExpiresAt: null,metadataPurgedAt: null,metadataPurgeAfter: new Date(now+30*86400000).toISOString(),
   };
   assert.equal(await store.insertOperation(operation), true);
   return operation;
@@ -138,11 +138,13 @@ test("decision and executor CAS each have one winner with atomic actor/time/audi
   const results = await Promise.all(claims.map((claim) => store.reserve(claim)));
   assert.equal(results.filter(Boolean).length,1);
   const winner = claims[results.indexOf(true)]!;
-  assert.equal(await store.finish({ ...winner,state: "succeeded",result: { accepted: true } }),true);
+  assert.equal(await store.finish({ ...winner,state: "succeeded",result: { schemaVersion: 1,code: "completed",resourceKind: "mail",errorCode: null },privateResultEnvelope:envelope,privateResultExpiresAt:new Date(Date.now()+86400000).toISOString() }),true);
   assert.equal(await store.finish({ ...winner,state: "failed",result: null }),false);
   const final = (await store.findOperation(companyId,op.id))!;
   assert.deepEqual(final.audit.map((entry) => entry.state),["pending","approved","executing","succeeded"]);
   assert.equal(final.executorNonce,winner.executorNonce);
+  assert.deepEqual(final.privateResultEnvelope,envelope);
+  assert.equal((await store.listOperations(companyId,100)).find((row)=>row.id===op.id)?.privateResultEnvelope,null);
 });
 
 test("audit constraint failure rolls back decision and leaves no executable approval", async () => {
@@ -156,6 +158,15 @@ test("audit constraint failure rolls back decision and leaves no executable appr
     assert.equal(unchanged.audit.length,1);
     assert.equal(await store.reserve(reservation(op)),false);
   } finally { await sql.unsafe(`ALTER TABLE "${namespace}".operations DROP CONSTRAINT synthetic_audit_failure`); }
+  const completion=await fixture();await store.decide(decision(completion));
+  const claim=reservation(completion);await store.reserve(claim);
+  await sql.unsafe(`ALTER TABLE "${namespace}".operations ADD CONSTRAINT synthetic_audit_failure CHECK(id <> '${completion.id}'::uuid OR jsonb_array_length(audit)<=3)`);
+  try {
+    await assert.rejects(store.finish({...claim,state:"succeeded",result:{schemaVersion:1,code:"created",resourceKind:"mail",errorCode:null},privateResultEnvelope:envelope,privateResultExpiresAt:new Date(Date.now()+86400000).toISOString()}),/^GovernanceError: storage_unavailable$/);
+    const unchanged=(await store.findOperation(companyId,completion.id))!;
+    assert.equal(unchanged.state,"executing");assert.equal(unchanged.privateResultEnvelope,null);assert.equal(unchanged.result,null);assert.equal(unchanged.audit.length,3);
+  } finally {await sql.unsafe(`ALTER TABLE "${namespace}".operations DROP CONSTRAINT synthetic_audit_failure`);}
+  await store.finish({...claim,state:"unknown",result:null});
 });
 
 test("rejection and definitive execution failure are terminal and preserve the immutable snapshot", async () => {
@@ -165,7 +176,7 @@ test("rejection and definitive execution failure are terminal and preserve the i
   assert.equal(await store.decide(decision(rejected)),false);
   const failed = await fixture();await store.decide(decision(failed));
   const claim = reservation(failed);await store.reserve(claim);
-  assert.equal(await store.finish({ ...claim,state: "failed",result: { code: "synthetic_rejection" } }),true);
+  assert.equal(await store.finish({ ...claim,state: "failed",result: { schemaVersion: 1,code: "failed",resourceKind: "mail",errorCode: "provider_unavailable" } }),true);
   assert.equal(await store.reserve(reservation(failed)),false);
   const saved = (await store.findOperation(companyId,failed.id))!;
   assert.equal(saved.state,"failed");
@@ -184,10 +195,10 @@ test("company, snapshot, agent, resource and approver isolation fail closed", as
   assert.equal(await store.insertOperation({ ...op,id: randomUUID(),resource: "folder-b" }),false);
   assert.equal(await store.insertOperation({ ...op,id: randomUUID(),tenantId: randomUUID() }),false);
   assert.equal(await store.insertOperation({ ...op,id: randomUUID(),homeAccountId: "different-account" }),false);
-  assert.equal(await store.setPolicy({ companyId,connectionId: op.connectionId,expectedRevision: 1,
+  assert.equal(await store.setPolicy({ companyId,connectionId: op.connectionId!,expectedRevision: 1,
     bindings: [agentId,randomUUID()].map((id) => ({ agentId: id,rules: [{ operationType: "mail-send",resources: ["*"] }] })),
     approverUserIds: [userId],actorId: userId }),false);
-  assert.equal(await store.setPolicy({ companyId,connectionId: op.connectionId,expectedRevision: 1,
+  assert.equal(await store.setPolicy({ companyId,connectionId: op.connectionId!,expectedRevision: 1,
     bindings: [{ agentId,rules: [{ operationType: "mail-send",resources: ["*"] }] }],approverUserIds: [userId],actorId: userId }),true);
   assert.equal(await store.insertOperation({ ...op,id: randomUUID(),resource: "folder-b",policyRevision: 2 }),true);
   assert.equal(await store.decide(decision(op)),false,"old policy revision cannot be approved");
@@ -295,4 +306,38 @@ test("pinned host gateway identity guards reject mismatched company/agent/run be
   }
   assert.equal(queries,0);
   assert.equal(dispatches,0);
+});
+
+test("controlled invalidation is atomic, isolated and cannot reset executing or unknown", async () => {
+  const pending=await fixture();const approved=await fixture();const running=await fixture();
+  await store.decide(decision(approved));await store.decide(decision(running));
+  const claim=reservation(running);await store.reserve(claim);
+  const invalidate=(op:OperationRecord)=>({companyId,operationId:op.id,userId,correlationId:randomUUID()});
+  assert.equal(await store.invalidate({...invalidate(pending),companyId:randomUUID()}),false);
+  for(const op of [pending,approved]) {
+    assert.equal(await store.invalidate(invalidate(op)),true);
+    const saved=(await store.findOperation(companyId,op.id))!;
+    assert.equal(saved.state,"invalidated");assert.equal(saved.envelope,null);assert.equal(saved.audit.at(-1)?.actorId,userId);
+    assert.equal(await store.reserve(reservation(op)),false);
+  }
+  assert.equal(await store.invalidate(invalidate(running)),false);
+  await store.finish({...claim,state:"unknown",result:null});
+  assert.equal(await store.invalidate(invalidate(running)),false);
+});
+
+test("private expiry and metadata redaction preserve non-replayable minimal tombstones", async () => {
+  const op=await fixture();await store.decide(decision(op));const claim=reservation(op);await store.reserve(claim);
+  await store.finish({...claim,state:"unknown",result:{schemaVersion:1,code:"unknown",resourceKind:"mail",errorCode:"unknown"},privateResultEnvelope:envelope,privateResultExpiresAt:new Date(Date.now()+86400000).toISOString()});
+  await sql.unsafe(`UPDATE "${namespace}".operations SET private_result_expires_at=now()-interval '1 minute' WHERE company_id=$1 AND id=$2`,[companyId,op.id]);
+  await store.purgeExpired(companyId);
+  assert.equal((await store.findOperation(companyId,op.id))?.privateResultEnvelope,null);
+  await sql.unsafe(`UPDATE "${namespace}".operations SET metadata_purge_after=now()-interval '1 minute' WHERE company_id=$1 AND id=$2`,[companyId,op.id]);
+  await store.purgeExpired(companyId);
+  const row=(await store.findOperation(companyId,op.id))!;
+  assert.equal(row.state,"unknown");assert.equal(row.snapshotHash,op.snapshotHash);assert.equal(row.executorNonce,claim.executorNonce);
+  assert(row.metadataPurgedAt);assert.equal(row.connectionId,null);assert.equal(row.agentId,null);assert.equal(row.projectId,null);assert.equal(row.tenantId,null);assert.equal(row.homeAccountId,null);assert.equal(row.resource,null);
+  assert.deepEqual(row.audit,[]);assert.equal(row.decisionUserId,null);assert.equal(row.result,null);assert.equal(row.envelope,null);
+  assert.equal(await store.reserve(reservation(op)),false);
+  assert.equal(await store.finish({...claim,state:"succeeded",result:null}),false);
+  assert.equal(await store.invalidate({companyId,operationId:op.id,userId,correlationId:randomUUID()}),false);
 });

@@ -11,6 +11,8 @@
   "files": [
     "dist",
     "migrations",
+    "docs/runbooks/m365-operations.md",
+    "docs/wp04-transport-monitoring.md",
     "LICENSE",
     "README.md"
   ],

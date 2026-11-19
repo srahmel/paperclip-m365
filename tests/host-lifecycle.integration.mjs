@@ -79,6 +79,8 @@ try {
         { migrationKey: "002_auth_connections.sql", status: "applied" },
         { migrationKey: "003_atomic_cache_state.sql", status: "applied" },
         { migrationKey: "004_governed_operations.sql", status: "applied" },
+        { migrationKey: "005_private_operation_results.sql", status: "applied" },
+        { migrationKey: "006_telemetry.sql", status: "applied" },
       ],
       `${expectedStatus} changed the migration ledger`,
     );

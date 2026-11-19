@@ -37,8 +37,8 @@ const result = {
   states: ["absent", "installed", "ready", "disabled", "ready", "disabled", "uninstalled", "installed", "ready"],
   readOnlySmoke: "scaffold-status",
   health: "ready",
-  migrationCount: 4,
-  migrationKeys: ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql"],
+  migrationCount: 6,
+  migrationKeys: ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql", "005_private_operation_results.sql", "006_telemetry.sql"],
   microsoftIntegration: "governed-operations",
   namespace: "plugin_m365_8b2a74e8fa",
   schemaVersion: 1,
@@ -60,6 +60,8 @@ test("canonical lifecycle evidence rejects empty, invalid, incomplete, and marke
     JSON.stringify({ ...result, migrationKeys: ["001_scaffold_metadata.sql"] }),
     JSON.stringify({ ...result, migrationKeys: ["001_scaffold_metadata.sql", "001_scaffold_metadata.sql"] }),
     JSON.stringify({ ...result, migrationKeys: ["002_auth_connections.sql", "001_scaffold_metadata.sql"] }),
+    JSON.stringify({ ...result, migrationCount: 4, migrationKeys: result.migrationKeys.slice(0, 4) }),
+    JSON.stringify({ ...result, migrationCount: 6, migrationKeys: result.migrationKeys.slice(0, 5) }),
     JSON.stringify({ ...result, microsoftIntegration: "not-configured" }),
   ]) {
     assert.throws(() => assertLifecycleEvidence(evidence, jsonl(phases), revision));

@@ -7,6 +7,7 @@ import {
 import { translations } from "../auth/localization.js";
 import { ActionEpoch, AuthenticationPoller, type AuthenticationSession } from "./authentication-poller.js";
 import { GovernancePanel } from "./governance-panel.js";
+import { TelemetryPanel } from "./telemetry-panel.js";
 
 type ScaffoldStatus = {
   status: "ready";
@@ -192,6 +193,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         connectionId={connectionId}
         locale={locale}
       /> : null}
+      {context.companyId ? <TelemetryPanel key={context.companyId} locale={locale} /> : null}
     </main>
   );
 }

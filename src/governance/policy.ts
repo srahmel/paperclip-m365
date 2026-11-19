@@ -1,7 +1,29 @@
-import { operationTypes, readOperationTypes, GovernanceError, type AgentBinding, type AgentIdentity, type ConnectionPolicy, type Json, type OperationType } from "./types.js";
+import { operationTypes, readOperationTypes, resultCodes, resultResourceKinds, resultErrorCodes, GovernanceError, type AgentBinding, type AgentIdentity, type ConnectionPolicy, type Json, type OperationType, type PublicResultSummary, type PrivateOperationResult } from "./types.js";
 
 export const MAX_SNAPSHOT_BYTES = 6 * 1024 * 1024;
 export const MAX_RESULT_BYTES = 64 * 1024;
+export function publicResult(value: unknown, state?: "succeeded" | "failed" | "unknown"): PublicResultSummary | null {
+  if (value === null) return null;
+  const result = immutableJson(value, 1024) as PublicResultSummary;
+  if (!result || typeof result!=="object" || Array.isArray(result) ||
+      Object.keys(result).sort().join(",")!=="code,errorCode,resourceKind,schemaVersion" || result.schemaVersion!==1 ||
+      !resultCodes.includes(result.code) || !resultResourceKinds.includes(result.resourceKind) ||
+      (result.errorCode!==null && !resultErrorCodes.includes(result.errorCode))) throw new GovernanceError("result_invalid");
+  if ((state==="succeeded" && (["failed","unknown"].includes(result.code) || result.errorCode!==null)) ||
+      (state==="failed" && result.code!=="failed") || (state==="unknown" && result.code!=="unknown")) throw new GovernanceError("result_invalid");
+  return result;
+}
+export function privateResult(value: unknown): PrivateOperationResult | null {
+  if (value===null || value===undefined) return null;
+  const result = immutableJson(value,4096) as PrivateOperationResult;
+  if (!result || typeof result!=="object" || Array.isArray(result) || Object.keys(result).length<1 ||
+      Object.keys(result).some((key)=>key!=="resourceId" && key!=="etag")) throw new GovernanceError("result_invalid");
+  if (result.resourceId!==undefined && (typeof result.resourceId!=="string" ||
+      !/^[A-Za-z0-9_+=.!~\/-]{1,1024}$/.test(result.resourceId) || result.resourceId.startsWith("//"))) throw new GovernanceError("result_invalid");
+  if (result.etag!==undefined && (typeof result.etag!=="string" || result.etag.length>1024 ||
+      !/^(?:W\/)?"[\x21\x23-\x7e]+"$/.test(result.etag) || result.etag.includes("://"))) throw new GovernanceError("result_invalid");
+  return result;
+}
 const allTypes = new Set<string>(operationTypes);
 const forbiddenKeys = new Set(["__proto__", "prototype", "constructor"]);
 

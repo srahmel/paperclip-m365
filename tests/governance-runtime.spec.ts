@@ -40,6 +40,7 @@ async function setup() {
     list: vi.fn().mockResolvedValue([]), preview: vi.fn().mockResolvedValue({}), decide: vi.fn().mockResolvedValue({}),
     execute: vi.fn().mockResolvedValue({}), recover: vi.fn().mockResolvedValue(0), purge: vi.fn().mockResolvedValue(0),
     status: vi.fn().mockResolvedValue({ id: operationId, state: "pending" }),
+    getResult: vi.fn().mockResolvedValue({operationId,privateResult:{resourceId:"private-id"}}),invalidate:vi.fn().mockResolvedValue({id:operationId,state:"invalidated"}),
   };
   const agents = vi.spyOn(harness.ctx.agents, "get").mockResolvedValue({ id: agentId, companyId, status: "idle" } as Agent);
   const registry = new AuthenticationSessionRegistry();
@@ -49,6 +50,13 @@ async function setup() {
 }
 
 describe("governance human runtime boundary", () => {
+  it("uses only the authenticated human when invalidating requests before key rotation", async () => {
+    const {harness,service}=await setup();
+    await expect(harness.performAction("operation-invalidate",{operationId,userId:"spoofed",companyId:foreignCompanyId},human)).resolves.toMatchObject({state:"invalidated"});
+    expect(service.invalidate).toHaveBeenCalledExactlyOnceWith({companyId,userId,operationId});
+    await expect(harness.performAction("operation-invalidate",{operationId},{companyId,actor:{type:"agent",agentId}})).rejects.toThrow();
+    expect(service.invalidate).toHaveBeenCalledTimes(1);
+  });
   it("permits saving the first policy with expected revision zero", async () => {
     const { harness, service } = await setup();
     await expect(harness.performAction("policy-set", { connectionId, expectedRevision: 0, bindings: policy.bindings, approverUserIds: [userId] }, human)).resolves.toEqual(policy);
@@ -186,6 +194,14 @@ describe("scheduled operation retention", () => {
 });
 
 describe("governance agent tool boundary", () => {
+  it("routes private result lookup through the authenticated run identity without payload or actor authority", async () => {
+    const {harness,service}=await setup();
+    await expect(harness.executeTool("operation-get-result",{operationId,agentId:connectionId,companyId:foreignCompanyId,payload:{secret:"canary"}},identity)).resolves.toMatchObject({data:{privateResult:{resourceId:"private-id"}}});
+    expect(service.getResult).toHaveBeenCalledExactlyOnceWith({identity,operationId});
+    service.getResult.mockRejectedValueOnce(new GovernanceError("result_unavailable"));
+    expect(await harness.executeTool("operation-get-result",{operationId},identity)).toEqual({error:"result_unavailable"});
+    expect(service.execute).not.toHaveBeenCalled();
+  });
   it.each(["companyId", "agentId", "runId", "projectId"] as const)("requires host %s before service dispatch", async (field) => {
     const { harness, service, agents } = await setup();
     const result = await harness.executeTool("operation-get-status", { operationId, ...identity }, { ...identity, [field]: "" });
@@ -208,7 +224,7 @@ describe("governance agent tool boundary", () => {
     expect(await harness.executeTool("connection-get-status", { connectionId, companyId: foreignCompanyId }, identity)).toEqual({ data: { connectionId, status: "connected" } });
     expect(service.getPolicy).toHaveBeenCalledExactlyOnceWith(companyId, connectionId);
     expect(service.execute).not.toHaveBeenCalled(); expect(service.decide).not.toHaveBeenCalled();
-    expect(manifest.tools?.map((tool) => tool.name)).toEqual(["operation-get-status", "connection-get-status"]);
+    expect(manifest.tools?.map((tool) => tool.name)).toEqual(expect.arrayContaining(["operation-get-result", "operation-get-status", "connection-get-status"]));
   });
 
   it("fails closed on unassigned connections and unexpected identity/service errors", async () => {
@@ -239,6 +255,24 @@ describe("governance agent tool boundary", () => {
 
 
 describe("production governance agent authorization", () => {
+  it("observes denied actions/tools only under host context tenancy despite forged payload and failing observer", async () => {
+    const harness = createTestHarness({ manifest });
+    const observe = vi.fn().mockRejectedValue(new Error("private-telemetry-failure"));
+    const status = vi.fn().mockRejectedValue(new GovernanceError("payload_too_large"));
+    const getPolicy = vi.fn().mockRejectedValue(new GovernanceError("storage_unavailable"));
+    vi.spyOn(harness.ctx.agents, "get").mockResolvedValue({ id: agentId, companyId, status: "idle" } as Agent);
+    registerGovernance({ ctx: harness.ctx, registerAction: harness.ctx.actions.register, resolveKey: async () => { throw new Error(); },
+      authorizeHuman: async (context) => { if (context.actor.type !== "user") throw new Error("private-denial"); return { companyId: context.companyId!, userId }; },
+      track: async (operation) => operation(), observe, factory: () => ({ status, getPolicy } as unknown as GovernanceService),
+    });
+    await expect(harness.performAction("policy-get", { connectionId, companyId: foreignCompanyId }, { companyId, actor: { type: "agent", agentId } })).rejects.toThrow("approval_forbidden");
+    expect(observe).toHaveBeenLastCalledWith(companyId, { kind: "denial", errorClass: "authorization", component: "action" });
+    await expect(harness.performAction("policy-get", { connectionId, companyId: foreignCompanyId }, human)).rejects.toThrow("storage_unavailable");
+    expect(observe).toHaveBeenLastCalledWith(companyId, { kind: "fault", errorClass: "database", component: "action" });
+    await expect(harness.executeTool("operation-get-status", { operationId, companyId: foreignCompanyId }, identity)).resolves.toMatchObject({ error: "payload_too_large" });
+    expect(observe).toHaveBeenLastCalledWith(companyId, { kind: "denial", errorClass: "size", component: "action" });
+    expect(observe).toHaveBeenCalledTimes(3); expect(JSON.stringify(observe.mock.calls)).not.toContain(foreignCompanyId);
+  });
   it("uses live scoped host lookup and denies missing, foreign, withdrawn and failed lookups", async () => {
     const harness = createTestHarness({ manifest });
     const agents = vi.spyOn(harness.ctx.agents, "get");

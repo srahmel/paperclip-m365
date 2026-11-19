@@ -11,6 +11,13 @@ trap {
     Write-Output "::error title=Windows lifecycle failed::$phase - $detail"
     exit 1
 }
+function Assert-TapCounts([string]$Path, [int]$Count) {
+    $lines = Get-Content -LiteralPath $Path
+    foreach ($expected in @("# tests $Count", "# pass $Count", '# fail 0')) {
+        if ($lines -notcontains $expected) { throw "PostgreSQL evidence missing '$expected' in $Path" }
+    }
+}
+
 $source = Join-Path $Work 'paperclip-source'
 $store = Join-Path $Work 'pnpm-store'
 $npmCache = Join-Path $Work 'npm-cache'
@@ -151,13 +158,24 @@ try {
 
     $phase = 'run-wp02-postgresql'
     & node --import $importUrls[0] --test --test-reporter=tap --test-timeout=120000 `
-        (Join-Path $Repo 'tests/sql-connection-store.postgres.integration.ts')
+        (Join-Path $Repo 'tests/sql-connection-store.postgres.integration.ts') 2>&1 |
+        Tee-Object -FilePath (Join-Path $evidence 'wp02-postgresql.tap')
     if ($LASTEXITCODE -ne 0) { throw 'Windows WP02 PostgreSQL integration failed' }
+    Assert-TapCounts (Join-Path $evidence 'wp02-postgresql.tap') 6
 
     $phase = 'run-wp03-postgresql'
     & node --import $importUrls[0] --test --test-reporter=tap --test-timeout=120000 `
-        (Join-Path $Repo 'tests/governance.postgres.integration.ts')
+        (Join-Path $Repo 'tests/governance.postgres.integration.ts') 2>&1 |
+        Tee-Object -FilePath (Join-Path $evidence 'wp03-postgresql.tap')
     if ($LASTEXITCODE -ne 0) { throw 'Windows WP03 PostgreSQL integration failed' }
+    Assert-TapCounts (Join-Path $evidence 'wp03-postgresql.tap') 11
+
+    $phase = 'run-wp04-postgresql'
+    & node --import $importUrls[0] --test --test-reporter=tap --test-timeout=120000 `
+        (Join-Path $Repo 'tests/telemetry.postgres.integration.ts') 2>&1 |
+        Tee-Object -FilePath (Join-Path $evidence 'wp04-postgresql.tap')
+    if ($LASTEXITCODE -ne 0) { throw 'Windows WP04 PostgreSQL integration failed' }
+    Assert-TapCounts (Join-Path $evidence 'wp04-postgresql.tap') 6
 
     $phase = 'run-host-lifecycle'
     Write-Output "::notice title=Windows lifecycle phase::$phase - starting node with 2 file URL imports"
@@ -205,5 +223,8 @@ try {
     hostCommit = 'd69631b01b9c658f80bf8bed389863dce82643e1'
     database = 'disposable-loopback-postgresql'
     syntheticDataOnly = $true
+    wp02PostgresAssertions = '6/6'
+    wp03PostgresAssertions = '11/11'
+    wp04PostgresAssertions = '6/6'
     packageDigestVerifiedAt = @('install', 'restore')
 } | ConvertTo-Json -Compress

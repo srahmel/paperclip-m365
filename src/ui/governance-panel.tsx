@@ -33,6 +33,7 @@ export function GovernancePanel({ companyId, connectionId, locale }: { companyId
   const listOperations = usePluginAction("operation-list");
   const getPreview = usePluginAction("operation-preview");
   const decide = usePluginAction("operation-decide");
+  const invalidate = usePluginAction("operation-invalidate");
   const [requests] = useState(() => new GovernanceRequests());
   const [previewExpiry] = useState(() => new PreviewExpiry());
   const [policy, updatePolicy] = useState<ConnectionPolicy | null>(null);
@@ -109,6 +110,10 @@ export function GovernancePanel({ companyId, connectionId, locale }: { companyId
         {operation.decisionUserId ? <><dt>{t.decision}</dt><dd>{operation.decisionUserId}</dd><dt>{t.decided}</dt><dd>{operation.decidedAt}</dd></> : null}</dl>
       {operation.state === "unknown" ? <p role="alert">{t.unknown}</p> : null}
       {operation.state === "approved" ? <p>{t.approved}</p> : null}
+      {["pending", "approved"].includes(operation.state) ? <button type="button" disabled={busy} onClick={() => run(async () => await invalidate({ operationId: operation.id }) as PublicOperation, (next) => {
+        if (next.id !== operation.id || next.connectionId !== connectionId) throw new Error("scope_mismatch");
+        setOperations((current) => current?.map((item) => item.id === next.id ? next : item) ?? null); setNotice(t.changed);
+      })}>{locale.toLowerCase().startsWith("de") ? "Anfrage dauerhaft ungültig machen" : "Permanently invalidate request"}</button> : null}
       {operation.state === "pending" ? <button type="button" disabled={busy} onClick={() => run(async () => await getPreview({ operationId: operation.id }) as OperationPreview, (next) => {
         if (next.operation.id !== operation.id || next.operation.connectionId !== connectionId || next.snapshot.companyId !== companyId || next.snapshot.connectionId !== connectionId) throw new Error("scope_mismatch");
         if (!previewIsCurrent(next)) throw new Error("preview_expired");

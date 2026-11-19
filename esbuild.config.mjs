@@ -11,4 +11,5 @@ await Promise.all([
     external: [...presets.esbuild.worker.external, "@azure/msal-node"],
   })),
   esbuild.build(distribution(presets.esbuild.ui)),
+  esbuild.build({ entryPoints: ["src/telemetry/watchdog.ts"], outfile: "dist/watchdog.js", platform: "node", format: "esm", bundle: true, sourcemap: false, target: "node24" }),
 ]);

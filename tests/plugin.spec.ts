@@ -36,10 +36,17 @@ describe("M365 plugin scaffold", () => {
       "agents.read",
       "agent.tools.register",
       "jobs.schedule",
+      "metrics.write",
+      "issues.read",
+      "issues.create",
+      "issues.update",
+      "projects.read",
+      "plugin.state.read",
+      "plugin.state.write",
     ]);
-    expect(manifest.tools?.map((tool) => tool.name)).toEqual(["operation-get-status", "connection-get-status"]);
+    expect(manifest.tools?.map((tool) => tool.name)).toEqual(["operation-get-result", "operation-get-status", "connection-get-status"]);
     expect(manifest.apiRoutes).toBeUndefined();
-    expect(manifest.jobs?.map((job) => job.jobKey)).toEqual(["operation-retention"]);
+    expect(manifest.jobs?.map((job) => job.jobKey)).toEqual(["operation-retention", "telemetry-evaluate"]);
   });
 
   it("exposes content-free connection-management status through the worker seam", async () => {
@@ -70,7 +77,7 @@ describe("M365 plugin scaffold", () => {
     await expect(instance.definition.onHealth?.()).resolves.toMatchObject({ status: "degraded", message: "company_configuration_not_checked" });
     expect(config).not.toHaveBeenCalled();
     expect(secret).not.toHaveBeenCalled();
-    expect(harness.dbQueries).toHaveLength(2);
+    expect(harness.dbQueries).toHaveLength(5);
     expect(harness.dbQueries[1]?.sql).toContain("snapshot_hash, executor_nonce, audit");
     expect(harness.dbQueries[0]?.sql).toContain("cache_authentication_tag");
     vi.spyOn(harness.ctx.db, "query").mockRejectedValueOnce(new Error("private database endpoint"));
