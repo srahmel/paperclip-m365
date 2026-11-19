@@ -145,6 +145,24 @@ test("decision and executor CAS each have one winner with atomic actor/time/audi
   assert.equal(final.executorNonce,winner.executorNonce);
   assert.deepEqual(final.privateResultEnvelope,envelope);
   assert.equal((await store.listOperations(companyId,100)).find((row)=>row.id===op.id)?.privateResultEnvelope,null);
+  // Bypass the service validator deliberately: CHECK must reject SQL UNKNOWN
+  // from JSON-null enum fields, while allowing the explicitly nullable error code.
+  const validResult = { schemaVersion: 1, code: "completed", resourceKind: "mail", errorCode: null };
+  for (const malformed of [
+    { ...validResult, code: null }, { ...validResult, resourceKind: null },
+    { ...validResult, code: null, resourceKind: null },
+  ]) {
+    await assert.rejects(sql.unsafe(`UPDATE "${namespace}".operations SET result=$3::jsonb WHERE company_id=$1 AND id=$2`,
+      [companyId, op.id, JSON.stringify(malformed)]), (error: unknown) => {
+        const failure = error as { code?: string; constraint_name?: string };
+        return failure.code === "23514" && failure.constraint_name === "operation_public_result_shape";
+      });
+    assert.deepEqual((await store.findOperation(companyId, op.id))?.result, validResult);
+  }
+  await sql.unsafe(`UPDATE "${namespace}".operations SET result=$3::jsonb WHERE company_id=$1 AND id=$2`,
+    [companyId, op.id, JSON.stringify(validResult)]);
+  assert.deepEqual((await store.findOperation(companyId, op.id))?.result, validResult);
+
 });
 
 test("audit constraint failure rolls back decision and leaves no executable approval", async () => {

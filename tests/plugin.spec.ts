@@ -5,8 +5,28 @@ import { AuthenticationSessionRegistry } from "../src/auth/auth-session-registry
 import manifest from "../src/manifest.js";
 import { createM365Plugin } from "../src/plugin.js";
 import plugin from "../src/worker.js";
+import { TelemetryService } from "../src/telemetry/telemetry-service.js";
 
 describe("M365 plugin scaffold", () => {
+  it.each(["start-sign-in", "reactivate"])("records asynchronous %s failures without private provider details", async (action) => {
+    const observed = vi.spyOn(TelemetryService.prototype, "observe").mockResolvedValue(undefined);
+    const sessions = new AuthenticationSessionRegistry();
+    try {
+      const manager = new ConnectionManager({ store: new ActionMemoryStore(),
+        provider: { async signIn() { throw new Error("private-provider-canary"); }, async acquireToken() { throw new Error("unused"); } },
+        resolveCacheKey: async () => ({ value: Buffer.alloc(32, 7).toString("base64"), version: "test" }),
+      });
+      const harness = createTestHarness({ manifest }); seedConnectionManagers(harness);
+      const instance = createM365Plugin(async () => manager, sessions);
+      await instance.definition.setup(harness.ctx);
+      const companyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const params = { connectionId: "11111111-1111-4111-8111-111111111111", expectedTenantId: "22222222-2222-4222-8222-222222222222", displayName: "Synthetic" };
+      if (action === "reactivate") await manager.createPendingConnection({ companyId, ...params, shareable: false });
+      await expect(harness.performAction(action, params, { companyId, actor: { type: "user", userId: "user-a" } })).resolves.toMatchObject({ status: "pending" });
+      await vi.waitFor(() => expect(observed).toHaveBeenCalledExactlyOnceWith(companyId, { kind: "fault", errorClass: "token", component: "token" }));
+      expect(JSON.stringify([observed.mock.calls, harness.logs])).not.toContain("private-provider-canary");
+    } finally { await sessions.shutdown(); observed.mockRestore(); }
+  });
   const validConfig = {
     microsoftClientId: "11111111-1111-4111-8111-111111111111",
     signInScopes: ["User.Read"],

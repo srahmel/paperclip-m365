@@ -26,7 +26,7 @@ ALTER TABLE plugin_m365_8b2a74e8fa.operations
       AND result->'schemaVersion'='1'::jsonb
       AND result->>'code' IN ('completed','created','updated','deleted','accepted','failed','unknown')
       AND result->>'resourceKind' IN ('mail','calendar','drive','none')
-      AND (result->'errorCode'='null'::jsonb OR result->>'errorCode' IN ('permission_denied','not_found','conflict','rate_limited','provider_unavailable','validation_failed','unknown')))),
+      AND (result->'errorCode'='null'::jsonb OR result->>'errorCode' IN ('permission_denied','not_found','conflict','rate_limited','provider_unavailable','validation_failed','unknown'))) IS TRUE),
   ADD CONSTRAINT operation_private_result_shape CHECK (
     (private_result_envelope IS NULL AND private_result_expires_at IS NULL)
     OR (private_result_envelope IS NOT NULL AND jsonb_typeof(private_result_envelope)='object' AND private_result_expires_at IS NOT NULL)

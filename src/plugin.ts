@@ -47,6 +47,18 @@ export function createM365Plugin(
         try { await telemetry?.observe(companyId, event); }
         catch { ctx.logger.error("telemetry_unavailable"); }
       };
+      const signIn = async (manager: ConnectionManager, ...args: Parameters<ConnectionManager["signIn"]>) => {
+        try { return await manager.signIn(...args); }
+        catch (error) {
+          // Device authentication continues after the start action returns, so its
+          // failures never reach the action wrapper. Cancellation is not a fault.
+          if (!args[2]?.aborted) {
+            const code = error instanceof ConnectionAccessError ? error.code : "provider_unavailable";
+            await observe(args[0].companyId, { kind: "fault", errorClass: code === "storage_unavailable" ? "database" : code === "key_unavailable" ? "secret" : "token", component: code === "storage_unavailable" ? "database" : "token" });
+          }
+          throw error;
+        }
+      };
       const registerAction = (name: string, handler: Parameters<typeof ctx.actions.register>[1]) => {
         ctx.actions.register(name, async (params, context) => {
           try { return await handler(params, context); }
@@ -122,7 +134,7 @@ export function createM365Plugin(
             initiatorUserId: userId,
             connectionId,
             run: async ({ signal, onChallenge }) => {
-              await manager.signIn(pendingConnection, onChallenge, signal);
+              await signIn(manager, pendingConnection, onChallenge, signal);
             },
           });
           return { operationId, connectionId, status: "pending" as const };
@@ -162,7 +174,7 @@ export function createM365Plugin(
             initiatorUserId: userId,
             connectionId,
             run: async ({ signal, onChallenge }) => {
-              await manager.signIn(pendingConnection, onChallenge, signal);
+              await signIn(manager, pendingConnection, onChallenge, signal);
             },
           });
           return { operationId, connectionId, status: "pending" as const };
