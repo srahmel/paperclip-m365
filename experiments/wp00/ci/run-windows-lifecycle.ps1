@@ -96,12 +96,21 @@ $importUrls = $importUrlsJson | ConvertFrom-Json
 if ($importUrls.Count -ne 2) { throw 'Windows import URL conversion returned an unexpected result' }
 
 $phase = 'run-host-lifecycle'
+$lifecycleStdout = Join-Path $evidence 'plugin-lifecycle.stdout.jsonl'
+$lifecycleStderr = Join-Path $evidence 'plugin-lifecycle.stderr.log'
+$lifecycleEvidence = Join-Path $evidence 'plugin-lifecycle.jsonl'
+Write-Output "::notice title=Windows lifecycle phase::$phase - starting node with 2 file URL imports"
 & node --import $importUrls[0] --import $importUrls[1] `
-    (Join-Path $Repo 'tests/host-lifecycle.integration.mjs') 2>&1 |
-    Tee-Object -FilePath (Join-Path $evidence 'plugin-lifecycle.jsonl')
-if ($LASTEXITCODE -ne 0) { throw 'Windows host lifecycle failed' }
+    (Join-Path $Repo 'tests/host-lifecycle.integration.mjs') `
+    1> $lifecycleStdout 2> $lifecycleStderr
+$lifecycleExitCode = $LASTEXITCODE
+Copy-Item -LiteralPath $lifecycleStdout -Destination $lifecycleEvidence
+Get-Content -LiteralPath $lifecycleStdout | Write-Output
+Get-Content -LiteralPath $lifecycleStderr | Write-Output
+Write-Output "::notice title=Windows lifecycle phase::$phase - node exit code $lifecycleExitCode"
+if ($lifecycleExitCode -ne 0) { throw "Windows host lifecycle failed with exit code $lifecycleExitCode" }
 
-$lifecycle = Get-Content -Raw -LiteralPath (Join-Path $evidence 'plugin-lifecycle.jsonl')
+$lifecycle = Get-Content -Raw -LiteralPath $lifecycleEvidence
 if ($lifecycle -notmatch '"check":"isolated-host-lifecycle"') {
     throw 'Windows lifecycle evidence is missing'
 }
