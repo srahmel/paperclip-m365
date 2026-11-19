@@ -85,17 +85,55 @@ async function waitUntilWaiting(applicationName: string): Promise<void> {
   throw new Error("cache writer did not reach the controlled PostgreSQL lock point");
 }
 
+async function applyMigration(migration: string): Promise<void> {
+  const contents = await readFile(resolve(repositoryRoot, "migrations", migration), "utf8");
+  // These migrations contain only ordinary DDL/DML, without procedural bodies.
+  for (const statement of contents.split(";").map((part) => part.trim()).filter(Boolean)) {
+    databaseContract.validatePluginMigrationStatement(statement, namespace);
+    await sql.unsafe(statement);
+  }
+}
+
 before(async () => {
   await sql.unsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
   await sql.unsafe(`CREATE SCHEMA "${namespace}"`);
   for (const migration of ["001_scaffold_metadata.sql", "002_auth_connections.sql"]) {
-    await sql.unsafe(await readFile(resolve(repositoryRoot, "migrations", migration), "utf8"));
+    await applyMigration(migration);
   }
+  await sql.unsafe(`INSERT INTO "${namespace}".connections
+    (company_id,id,display_name,expected_tenant_id,status,created_at,updated_at)
+    SELECT '00000000-0000-4000-8000-000000000109'::uuid,
+      ('00000000-0000-4000-8000-000000000' || suffix)::uuid,
+      'Synthetic upgrade', '00000000-0000-4000-8000-000000000309'::uuid,
+      state, now(), now()
+    FROM (VALUES ('209','connected'), ('210','disconnected'), ('211','connected')) AS fixtures(suffix,state)`);
+  await sql.unsafe(`INSERT INTO "${namespace}".token_caches
+    (company_id,connection_id,cache_version,algorithm,key_version,iv,ciphertext,authentication_tag)
+    SELECT company_id,id,7,'aes-256-gcm','v1','synthetic-iv','synthetic-ciphertext','synthetic-tag'
+    FROM "${namespace}".connections WHERE id <> '00000000-0000-4000-8000-000000000211'`);
+  await applyMigration("003_atomic_cache_state.sql");
 });
 
 after(async () => {
   await sql.unsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
   await sql.end({ timeout: 1 });
+});
+
+test("migration upgrades existing caches and clears legacy encrypted payloads", async () => {
+  const store = new SqlConnectionStore(database());
+  const companyId = "00000000-0000-4000-8000-000000000109";
+  assert.deepEqual(await store.readCache(companyId, "00000000-0000-4000-8000-000000000209"), {
+    version: 7, envelope,
+  });
+  assert.equal(await store.readCache(companyId, "00000000-0000-4000-8000-000000000210"), null);
+  const missing = await store.find(companyId, "00000000-0000-4000-8000-000000000211");
+  assert.equal(missing?.status, "blocked");
+  assert.equal(missing?.errorCode, "cache_invalid");
+  const legacy = await sql.unsafe(`SELECT iv,ciphertext,authentication_tag FROM "${namespace}".token_caches`);
+  assert.equal(legacy.length, 2);
+  for (const row of legacy) assert.deepEqual({ ...row }, { iv: "", ciphertext: "", authentication_tag: "" });
+  assert.equal(await store.disconnect(companyId, "00000000-0000-4000-8000-000000000209", "2026-11-19T00:01:00Z"), true);
+  assert.equal(await store.readCache(companyId, "00000000-0000-4000-8000-000000000209"), null);
 });
 
 test("PostgreSQL cache CAS has one winner and rejects stale generations", async () => {
@@ -134,8 +172,8 @@ test("PostgreSQL row locking serializes cache persistence with disconnect", asyn
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
-    CREATE TRIGGER pause_cache_write BEFORE INSERT OR UPDATE ON "${namespace}".token_caches
-    FOR EACH ROW EXECUTE FUNCTION "${namespace}".pause_cache_write()
+    CREATE TRIGGER pause_cache_write BEFORE UPDATE OF cache_version ON "${namespace}".connections
+    FOR EACH ROW WHEN (NEW.cache_version > 0) EXECUTE FUNCTION "${namespace}".pause_cache_write()
   `);
   await lockSql.unsafe("SELECT pg_advisory_lock(34402002)");
 
@@ -154,9 +192,67 @@ test("PostgreSQL row locking serializes cache persistence with disconnect", asyn
     assert.match((await store.find(companyId, connectionId))?.status ?? "", /^disconnected$/);
   } finally {
     await lockSql.unsafe("SELECT pg_advisory_unlock_all()");
-    await sql.unsafe(`DROP TRIGGER IF EXISTS pause_cache_write ON "${namespace}".token_caches`);
+    await sql.unsafe(`DROP TRIGGER IF EXISTS pause_cache_write ON "${namespace}".connections`);
     await sql.unsafe(`DROP FUNCTION IF EXISTS "${namespace}".pause_cache_write()`);
     await writerSql.end({ timeout: 1 });
+    await lockSql.end({ timeout: 1 });
+  }
+});
+
+test("PostgreSQL disconnect rejects stale reactivation and preserves a fresh generation cache", async () => {
+  const companyId = "00000000-0000-4000-8000-000000000105";
+  const connectionId = "00000000-0000-4000-8000-000000000205";
+  const tenantId = "00000000-0000-4000-8000-000000000305";
+  const applicationName = "wp02-disconnect-race";
+  const raceUrl = new URL(databaseUrl);
+  raceUrl.searchParams.set("application_name", applicationName);
+  const disconnectSql = postgres(raceUrl.toString(), { max: 1, idle_timeout: 1 });
+  const lockSql = postgres(databaseUrl, { max: 1, idle_timeout: 1 });
+  const disconnectingStore = new SqlConnectionStore(database(disconnectSql));
+  const reactivatingStore = new SqlConnectionStore(database());
+  await reactivatingStore.create(connection(connectionId, companyId, tenantId));
+  await sql.unsafe(`
+    CREATE OR REPLACE FUNCTION "${namespace}".pause_disconnect() RETURNS trigger AS $$
+    BEGIN
+      PERFORM pg_advisory_xact_lock(34402003);
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER pause_disconnect BEFORE UPDATE OF status ON "${namespace}".connections
+    FOR EACH ROW WHEN (NEW.status = 'disconnected') EXECUTE FUNCTION "${namespace}".pause_disconnect()
+  `);
+  await lockSql.unsafe("SELECT pg_advisory_lock(34402003)");
+
+  try {
+    const disconnect = disconnectingStore.disconnect(companyId, connectionId, "2026-11-19T00:04:00.000Z");
+    await waitUntilWaiting(applicationName);
+    const disconnected = await reactivatingStore.find(companyId, connectionId);
+    assert(disconnected);
+    const reactivated = {
+      ...disconnected,
+      generation: disconnected.generation + 1,
+      status: "pending" as const,
+      updatedAt: "2026-11-19T00:05:00.000Z",
+    };
+    const staleReactivation = reactivatingStore.update(reactivated, disconnected.generation);
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+    await lockSql.unsafe("SELECT pg_advisory_unlock(34402003)");
+    assert.equal(await disconnect, true);
+    assert.equal(await staleReactivation, false, "a pre-disconnect generation must not reactivate the row");
+    assert.equal(await reactivatingStore.readCache(companyId, connectionId), null);
+    const fresh = await reactivatingStore.find(companyId, connectionId);
+    assert(fresh);
+    assert.equal(fresh.status, "disconnected");
+    assert.equal(await reactivatingStore.update({ ...fresh, status: "pending" }, fresh.generation), true);
+    assert.equal(await reactivatingStore.compareAndSwapCache(companyId, connectionId, fresh.generation, 0, envelope), 1);
+    assert.equal(await reactivatingStore.update({ ...fresh, status: "connected" }, fresh.generation), true);
+    assert.equal((await reactivatingStore.find(companyId, connectionId))?.status, "connected");
+    assert.equal((await reactivatingStore.readCache(companyId, connectionId))?.version, 1);
+  } finally {
+    await lockSql.unsafe("SELECT pg_advisory_unlock_all()" );
+    await sql.unsafe(`DROP TRIGGER IF EXISTS pause_disconnect ON "${namespace}".connections`);
+    await sql.unsafe(`DROP FUNCTION IF EXISTS "${namespace}".pause_disconnect()`);
+    await disconnectSql.end({ timeout: 1 });
     await lockSql.end({ timeout: 1 });
   }
 });
@@ -166,9 +262,11 @@ test("a delayed provider result cannot recreate cache state after PostgreSQL dis
   const connectionId = "00000000-0000-4000-8000-000000000203";
   const tenantId = "00000000-0000-4000-8000-000000000303";
   let release!: () => void;
+  let entered!: () => void;
+  const providerEntered = new Promise<void>((resolveEntered) => { entered = resolveEntered; });
   const provider: MicrosoftAuthProvider = {
     async signIn() {
-      await new Promise<void>((resolveSignIn) => { release = resolveSignIn; });
+      await new Promise<void>((resolveSignIn) => { release = resolveSignIn; entered(); });
       return {
         account: { homeAccountId: "synthetic-account", tenantId, username: "synthetic@example.test" },
         serializedCache: "synthetic-late-cache",
@@ -189,10 +287,7 @@ test("a delayed provider result cannot recreate cache state after PostgreSQL dis
     displayName: "Synthetic delayed account",
     shareable: false,
   });
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (await new SqlConnectionStore(database()).find(companyId, connectionId)) break;
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
-  }
+  await providerEntered;
   await managerB.disconnect(companyId, connectionId);
   release();
 

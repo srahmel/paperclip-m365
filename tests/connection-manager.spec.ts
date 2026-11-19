@@ -538,4 +538,102 @@ describe("ConnectionManager", () => {
       errorCode: "tenant_mismatch",
     });
   });
+
+  it("persists a sanitized provider failure and supports an explicit reactivation retry", async () => {
+    const store = new MemoryConnectionStore();
+    let fail = true;
+    const provider: MicrosoftAuthProvider = {
+      async signIn() {
+        if (fail) throw new Error("private transport detail synthetic-token");
+        return {
+          account: { homeAccountId: "account-a", tenantId: "tenant-a", username: "a@example.test" },
+          serializedCache: "retry-cache",
+        };
+      },
+      async acquireToken() { throw new Error("not used"); },
+    };
+    const manager = new ConnectionManager({ store, provider, resolveCacheKey: async () => cacheKey });
+
+    await expect(manager.createAndSignIn({
+      companyId: "company-a",
+      connectionId: "connection-provider-retry",
+      expectedTenantId: "tenant-a",
+      displayName: "Provider retry",
+      shareable: false,
+    })).rejects.toEqual(new ConnectionAccessError("provider_unavailable"));
+    await expect(manager.getStatus("company-a", "connection-provider-retry")).resolves.toMatchObject({
+      status: "blocked",
+      errorCode: "provider_unavailable",
+    });
+    expect(JSON.stringify(await manager.getStatus("company-a", "connection-provider-retry")))
+      .not.toMatch(/private transport|synthetic-token/);
+
+    fail = false;
+    await expect(manager.reactivateAndSignIn("company-a", "connection-provider-retry")).resolves.toMatchObject({
+      status: "connected",
+      errorCode: null,
+    });
+  });
+  it("tracks token operations but leaves sign-in tracking to the session registry", async () => {
+    const store = new MemoryConnectionStore();
+    const provider = new SyntheticProvider({
+      "connection-a": { homeAccountId: "account-a", tenantId: "tenant-a", username: "a@example.test" },
+    });
+    const tracked: string[] = [];
+    const manager = new ConnectionManager({
+      store, provider, resolveCacheKey: async () => cacheKey,
+      trackOperation: async (operation) => { tracked.push("operation"); return operation(); },
+    });
+    await manager.createAndSignIn({ companyId: "company-a", connectionId: "connection-a", expectedTenantId: "tenant-a", displayName: "Alice", shareable: false });
+    expect(tracked).toEqual([]);
+    await manager.acquireAccessToken("company-a", "connection-a", ["User.Read"]);
+    expect(tracked).toEqual(["operation"]);
+  });
+
+  it("sanitizes and persists a generic token provider failure", async () => {
+    const store = new MemoryConnectionStore();
+    const provider = new SyntheticProvider({
+      "connection-a": { homeAccountId: "account-a", tenantId: "tenant-a", username: "a@example.test" },
+    });
+    const manager = new ConnectionManager({ store, provider, resolveCacheKey: async () => cacheKey });
+    await manager.createAndSignIn({ companyId: "company-a", connectionId: "connection-a", expectedTenantId: "tenant-a", displayName: "Alice", shareable: false });
+    vi.spyOn(provider, "acquireToken").mockRejectedValue(new Error("private-token-provider-data"));
+    await expect(manager.acquireAccessToken("company-a", "connection-a", ["User.Read"])).rejects.toEqual(new ConnectionAccessError("provider_unavailable"));
+    await expect(manager.getStatus("company-a", "connection-a")).resolves.toMatchObject({ status: "blocked", errorCode: "provider_unavailable" });
+    await expect(manager.acquireAccessToken("company-a", "connection-a", ["User.Read"])).rejects.toEqual(new ConnectionAccessError("connection_unavailable"));
+  });
+
+  it("sanitizes storage failures, persists a best-effort sign-in diagnostic and permits reactivation", async () => {
+    const store = new MemoryConnectionStore();
+    const provider = new SyntheticProvider({
+      "connection-a": { homeAccountId: "account-a", tenantId: "tenant-a", username: "a@example.test" },
+    });
+    const manager = new ConnectionManager({ store, provider, resolveCacheKey: async () => cacheKey });
+    vi.spyOn(store, "compareAndSwapCache").mockRejectedValueOnce(new Error("postgres://private-host synthetic-cache-secret"));
+    await expect(manager.createAndSignIn({ companyId: "company-a", connectionId: "connection-a", expectedTenantId: "tenant-a", displayName: "Alice", shareable: false }))
+      .rejects.toEqual(new ConnectionAccessError("storage_unavailable"));
+    await expect(manager.getStatus("company-a", "connection-a")).resolves.toMatchObject({ status: "blocked", errorCode: "storage_unavailable" });
+    await expect(manager.reactivateAndSignIn("company-a", "connection-a")).resolves.toMatchObject({ status: "connected", errorCode: null });
+    vi.spyOn(store, "readCache").mockRejectedValueOnce(new Error("private token cache"));
+    await expect(manager.acquireAccessToken("company-a", "connection-a", ["User.Read"]))
+      .rejects.toEqual(new ConnectionAccessError("storage_unavailable"));
+    await expect(manager.acquireAccessToken("company-a", "connection-a", ["User.Read"])).resolves.toBe("synthetic-access-token");
+    vi.spyOn(store, "disconnect").mockRejectedValueOnce(new Error("private write detail"));
+    await expect(manager.disconnect("company-a", "connection-a")).rejects.toEqual(new ConnectionAccessError("storage_unavailable"));
+    await expect(manager.getStatus("company-a", "connection-a")).resolves.toMatchObject({ status: "connected" });
+  });
+
+  it("preserves the safe storage error when its diagnostic cannot be persisted", async () => {
+    const store = new MemoryConnectionStore();
+    const provider = new SyntheticProvider({
+      "connection-a": { homeAccountId: "account-a", tenantId: "tenant-a", username: "a@example.test" },
+    });
+    const manager = new ConnectionManager({ store, provider, resolveCacheKey: async () => cacheKey });
+    vi.spyOn(store, "compareAndSwapCache").mockRejectedValue(new Error("private cache write"));
+    vi.spyOn(store, "update").mockRejectedValue(new Error("private diagnostic write"));
+    await expect(manager.createAndSignIn({ companyId: "company-a", connectionId: "connection-a", expectedTenantId: "tenant-a", displayName: "Alice", shareable: false }))
+      .rejects.toEqual(new ConnectionAccessError("storage_unavailable"));
+    expect(store.connections.get("company-a:connection-a")?.status).toBe("pending");
+  });
+
 });

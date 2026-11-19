@@ -82,10 +82,10 @@ export function assertLifecycleEvidence(lifecycleText, phaseText, expectedRevisi
   assert.deepEqual(result.states, expectedStates, "lifecycle state sequence mismatch");
   assert.equal(result.readOnlySmoke, "scaffold-status", "read-only smoke mismatch");
   assert.equal(result.health, "ready", "final lifecycle health mismatch");
-  assert.equal(result.migrationCount, 2, "migration count mismatch");
+  assert.equal(result.migrationCount, 3, "migration count mismatch");
   assert.deepEqual(
     result.migrationKeys,
-    ["001_scaffold_metadata.sql", "002_auth_connections.sql"],
+    ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql"],
     "migration keys mismatch",
   );
   assert.equal(result.microsoftIntegration, "connection-management", "Microsoft integration mismatch");

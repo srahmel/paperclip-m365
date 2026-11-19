@@ -77,6 +77,7 @@ try {
       [
         { migrationKey: "001_scaffold_metadata.sql", status: "applied" },
         { migrationKey: "002_auth_connections.sql", status: "applied" },
+        { migrationKey: "003_atomic_cache_state.sql", status: "applied" },
       ],
       `${expectedStatus} changed the migration ledger`,
     );

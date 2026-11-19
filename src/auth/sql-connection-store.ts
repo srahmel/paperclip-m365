@@ -33,13 +33,11 @@ type CacheRow = {
 export class SqlConnectionStore implements ConnectionStore {
   readonly #db: PluginDatabaseClient;
   readonly #connections: string;
-  readonly #caches: string;
 
   constructor(db: PluginDatabaseClient) {
     this.#db = db;
     const namespace = sqlIdentifier(db.namespace);
     this.#connections = `${namespace}."connections"`;
-    this.#caches = `${namespace}."token_caches"`;
   }
 
   async create(connection: ConnectionRecord): Promise<void> {
@@ -77,8 +75,9 @@ export class SqlConnectionStore implements ConnectionStore {
 
   async readCache(companyId: string, connectionId: string) {
     const rows = await this.#db.query<CacheRow>(
-      `SELECT cache_version, algorithm, key_version, iv, ciphertext, authentication_tag
-      FROM ${this.#caches} WHERE company_id = $1 AND connection_id = $2`,
+      `SELECT cache_version, cache_algorithm AS algorithm, cache_key_version AS key_version,
+        cache_iv AS iv, cache_ciphertext AS ciphertext, cache_authentication_tag AS authentication_tag
+      FROM ${this.#connections} WHERE company_id = $1 AND id = $2 AND cache_version > 0`,
       [companyId, connectionId],
     );
     if (rows.length !== 1) return null;
@@ -114,47 +113,27 @@ export class SqlConnectionStore implements ConnectionStore {
       envelope.ciphertext,
       envelope.authenticationTag,
     ];
-    const result = expectedVersion === 0
-      ? await this.#db.execute(
-          `INSERT INTO ${this.#caches} (
-            company_id, connection_id, cache_version, algorithm, key_version, iv, ciphertext, authentication_tag
-          ) SELECT $1, $2, $4, $5, $6, $7, $8, $9
-          WHERE EXISTS (
-            SELECT 1 FROM ${this.#connections}
-            WHERE company_id = $1 AND id = $2 AND generation = $3 AND status = 'pending'
-            FOR UPDATE
-          )
-          ON CONFLICT (company_id, connection_id) DO NOTHING`,
-          params,
-        )
-      : await this.#db.execute(
-          `UPDATE ${this.#caches} SET
-            cache_version = $4, algorithm = $5, key_version = $6, iv = $7,
-            ciphertext = $8, authentication_tag = $9, updated_at = now()
-          WHERE company_id = $1 AND connection_id = $2 AND cache_version = $10
-            AND EXISTS (
-              SELECT 1 FROM ${this.#connections}
-              WHERE company_id = $1 AND id = $2 AND generation = $3 AND status = 'connected'
-              FOR UPDATE
-            )`,
-          [...params, expectedVersion],
-        );
+    const result = await this.#db.execute(
+      `UPDATE ${this.#connections} SET cache_version = $4, cache_algorithm = $5,
+        cache_key_version = $6, cache_iv = $7, cache_ciphertext = $8,
+        cache_authentication_tag = $9
+      WHERE company_id = $1 AND id = $2 AND generation = $3 AND cache_version = $10
+        AND status = $11`,
+      [...params, expectedVersion, expectedVersion === 0 ? "pending" : "connected"],
+    );
     return result.rowCount === 1 ? nextVersion : null;
   }
 
   async disconnect(companyId: string, connectionId: string, updatedAt: string): Promise<boolean> {
     const result = await this.#db.execute(
       `UPDATE ${this.#connections} SET status = 'disconnected', error_code = NULL,
-        generation = generation + 1,
-        updated_at = $3::timestamptz WHERE company_id = $1 AND id = $2`,
+        generation = generation + 1, updated_at = $3::timestamptz,
+        cache_version = 0, cache_algorithm = NULL, cache_key_version = NULL,
+        cache_iv = NULL, cache_ciphertext = NULL, cache_authentication_tag = NULL
+      WHERE company_id = $1 AND id = $2`,
       [companyId, connectionId, updatedAt],
     );
-    if (result.rowCount !== 1) return false;
-    await this.#db.execute(
-      `DELETE FROM ${this.#caches} WHERE company_id = $1 AND connection_id = $2`,
-      [companyId, connectionId],
-    );
-    return true;
+    return result.rowCount === 1;
   }
 }
 

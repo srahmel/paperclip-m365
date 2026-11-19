@@ -2,6 +2,14 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("plugin schema migration", () => {
+  it("keeps the atomic cache migration within declarative host-supported SQL", async () => {
+    const sql = await readFile(new URL("../migrations/003_atomic_cache_state.sql", import.meta.url), "utf8");
+    expect(sql).toContain("ADD COLUMN cache_version bigint NOT NULL DEFAULT 0");
+    expect(sql).toContain("connections_cache_shape");
+    expect(sql).toContain("connection.company_id = cache.company_id AND connection.id = cache.connection_id");
+    expect(sql).toContain("SET iv = '', ciphertext = '', authentication_tag = ''");
+    expect(sql).not.toMatch(/\bCREATE\s+(?:FUNCTION|TRIGGER)|\bDELETE\s+FROM|\bTRUNCATE\b/i);
+  });
   it("creates only the additive scaffold metadata table in the derived namespace", async () => {
     const sql = await readFile(
       new URL("../migrations/001_scaffold_metadata.sql", import.meta.url),

@@ -94,14 +94,9 @@ class CacheDatabase implements PluginDatabaseClient {
 
   async execute(sql: string, params: unknown[] = []) {
     const key = this.key(params[0], params[1]);
-    if (sql.includes("INSERT INTO") && sql.includes('"token_caches"')) {
-      if (this.rows.has(key)) return { rowCount: 0 };
-      this.rows.set(key, [...params]);
-      return { rowCount: 1 };
-    }
-    if (sql.includes("UPDATE") && sql.includes('"token_caches"')) {
+    if (sql.includes("SET cache_version = $4")) {
       const row = this.rows.get(key);
-      if (!row || row[3] !== params[9]) return { rowCount: 0 };
+      if ((row?.[3] ?? 0) !== params[9]) return { rowCount: 0 };
       this.rows.set(key, params.slice(0, 9));
       return { rowCount: 1 };
     }
@@ -120,7 +115,7 @@ class StatefulConnectionDatabase implements PluginDatabaseClient {
 
   async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     const key = this.key(params[0], params[1]);
-    const row = sql.includes('"token_caches"') ? this.caches.get(key) : this.connections.get(key);
+    const row = sql.includes("cache_algorithm AS algorithm") ? this.caches.get(key) : this.connections.get(key);
     return row ? [structuredClone(row) as T] : [];
   }
 
@@ -142,6 +137,20 @@ class StatefulConnectionDatabase implements PluginDatabaseClient {
       row.error_code = null;
       row.generation = Number(row.generation) + 1;
       row.updated_at = params[2];
+      this.caches.delete(key);
+      return { rowCount: 1 };
+    }
+    if (sql.includes("SET cache_version = $4")) {
+      const connection = this.connections.get(key);
+      const cache = this.caches.get(key);
+      if (!connection || (cache?.cache_version ?? 0) !== params[9]
+        || connection.generation !== params[2] || connection.status !== params[10]) {
+        return { rowCount: 0 };
+      }
+      this.caches.set(key, {
+        cache_version: params[3], algorithm: params[4], key_version: params[5], iv: params[6],
+        ciphertext: params[7], authentication_tag: params[8],
+      });
       return { rowCount: 1 };
     }
     if (sql.includes("UPDATE") && sql.includes('"connections"')) {
@@ -153,33 +162,6 @@ class StatefulConnectionDatabase implements PluginDatabaseClient {
         created_at: params[11], updated_at: params[12],
       });
       return { rowCount: 1 };
-    }
-    if (sql.includes("INSERT INTO") && sql.includes('"token_caches"')) {
-      const connection = this.connections.get(key);
-      if (this.caches.has(key) || !connection || connection.generation !== params[2] || connection.status !== "pending") {
-        return { rowCount: 0 };
-      }
-      this.caches.set(key, {
-        cache_version: params[3], algorithm: params[4], key_version: params[5], iv: params[6],
-        ciphertext: params[7], authentication_tag: params[8],
-      });
-      return { rowCount: 1 };
-    }
-    if (sql.includes("UPDATE") && sql.includes('"token_caches"')) {
-      const connection = this.connections.get(key);
-      const cache = this.caches.get(key);
-      if (!cache || !connection || cache.cache_version !== params[9] || connection.generation !== params[2] || connection.status !== "connected") {
-        return { rowCount: 0 };
-      }
-      Object.assign(cache, {
-        cache_version: params[3], algorithm: params[4], key_version: params[5], iv: params[6],
-        ciphertext: params[7], authentication_tag: params[8],
-      });
-      return { rowCount: 1 };
-    }
-    if (sql.includes("DELETE FROM") && sql.includes('"token_caches"')) {
-      const removed = this.caches.delete(key);
-      return { rowCount: removed ? 1 : 0 };
     }
     return { rowCount: 0 };
   }

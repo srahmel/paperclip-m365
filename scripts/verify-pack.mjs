@@ -28,6 +28,7 @@ const requiredFiles = [
   "dist/worker.js",
   "migrations/001_scaffold_metadata.sql",
   "migrations/002_auth_connections.sql",
+  "migrations/003_atomic_cache_state.sql",
   "package.json",
 ];
 for (const requiredFile of requiredFiles) {

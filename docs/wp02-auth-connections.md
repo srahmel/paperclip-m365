@@ -14,9 +14,17 @@ The production adapters are:
 
 The stored MSAL cache is encrypted with AES-256-GCM. Its authenticated additional data binds company ID, connection ID, and key version. The resolved secret value must be the canonical padded RFC 4648 Base64 encoding of exactly 32 random bytes: 43 Base64 characters followed by one `=`. Passphrases, Base64url, empty, short, long, and non-canonical encodings fail closed before cache access. The plugin never hashes arbitrary text into an encryption key.
 
-Each cache row has a monotonically increasing version, and every connection has a persistent generation. Cache compare-and-swap and status updates require both the expected cache version and connection generation. Disconnect increments the generation before deleting the cache. Sign-in, token, or cache results that started under an older generation cannot restore a disconnected connection or recreate its cache, including across workers or process restarts.
+The encrypted cache and connection state occupy the same database row. Cache CAS
+requires the expected version, generation, and status. Disconnect clears all cache
+fields and increments the generation in one UPDATE. Concurrent writes therefore
+serialize on one row: a previous generation cannot restore a disconnected cache.
+There is no runtime transaction API, trigger, function, or multi-statement execute.
 
-Cache persistence locks the matching connection row in the same PostgreSQL statement that checks status and generation. This serializes it with disconnect's connection update: a cache write that wins first is followed by disconnect's cache deletion, while a disconnect that wins first makes the stale cache write ineligible. The isolated PostgreSQL 17 test deliberately pauses the cache statement after its eligibility snapshot and before commit, completes the competing path, and verifies that the final cache remains absent. No transaction API beyond the documented single-statement database contract is assumed.
+Migration 003 adds the inline fields, backfills eligible legacy encrypted caches,
+blocks connected records without a cache, and clears legacy ciphertext. The old
+table remains structurally present for migration history, but is not dual-written.
+The integration suite validates migrations with the pinned host's actual validator
+before execution and checks concurrency against PostgreSQL.
 
 Connections are records in their own right. Setting `shareable` only records that a connection may later be assigned for shared use. It does not grant any agent access. Agent authorization remains WP03.
 
@@ -31,7 +39,7 @@ The company configuration read through `ctx.config.get(companyId)` must contain:
   "cacheEncryptionKey": {
     "type": "secret_ref",
     "secretId": "00000000-0000-4000-8000-000000000000",
-    "version": "current"
+    "version": "latest"
   }
 }
 ```
@@ -52,7 +60,25 @@ The authentication registry tracks device-code polling, silent token work, and c
 
 New token use is rejected when the connection is absent, disconnected, blocked, interaction-required, or consent-revoked. A missing cache, missing key, wrong key version, failed authentication tag, malformed cache, or account metadata inconsistency changes the connection to `blocked` before returning an error. Tenant mismatch also blocks connection activation.
 
-Disconnect first persists `disconnected` and increments the connection generation, then deletes the local encrypted cache and aborts tracked work. If cache deletion or cleanup fails, the already invalidated generation still blocks later token use and stale writes. Successful disconnect guarantees that the cache row is gone and its auth session is no longer readable.
+Disconnect atomically persists the disconnected state, increments the generation,
+and clears the encrypted cache, then aborts tracked authentication work. A database
+failure cannot be reported as a successful disconnect. Unknown provider failures
+produce fixed error codes and a blocked connection that can be explicitly reactivated.
+
+## Readiness and retention
+
+Global health checks the required database schema. It cannot attest company-specific
+configuration because the health hook has no authenticated company context; it
+reports degraded with `company_configuration_not_checked` after a successful probe.
+The authenticated `company-readiness` action checks the explicitly scoped config,
+secret reference, canonical encryption key, and schema without Microsoft requests.
+Successful readiness does not establish Microsoft connectivity or consent. The host
+registry health route is not evidence that this worker hook was invoked.
+
+Consumed and terminal challenges are cleared immediately. Terminal sessions expire
+after a short bounded retention period, and a deadline timer cleans up without a
+follow-up user request. Admission and retained session counts are bounded; drain and
+shutdown account for pending work and cleanup.
 
 ## N1: download-artifact runtime maintenance
 
@@ -67,13 +93,13 @@ No other action was upgraded. The existing workflow still downloads the Linux an
 
 ## Verification boundary
 
-Synthetic tests cover separated accounts and companies, restart cache restoration, exactly one concurrent cache update winner, two-manager SQL generation CAS, delayed sign-in/token results after disconnect, canonical key validation before cache access, cache tampering, interaction-required and revoked-consent states, host grant enforcement, initiator/session isolation, expiry/replay/disconnect, lifecycle drain/shutdown behavior, content-free logs/action results, and deterministic localization. The isolated host gate additionally executes four cases against PostgreSQL 17 and the host's actual runtime SQL validators: concurrent cache CAS, controlled cache/disconnect lock interleaving, delayed provider completion after disconnect, and concurrent reconnect/disconnect generation rejection. Host lifecycle evidence requires the exact ordered migrations `001_scaffold_metadata.sql` and `002_auth_connections.sql` plus `microsoftIntegration=connection-management`; missing, duplicate, reordered, or contradictory evidence fails closed.
+Synthetic tests cover separated accounts and companies, restart cache restoration, exactly one concurrent cache update winner, two-manager SQL generation CAS, delayed sign-in/token results after disconnect, canonical key validation before cache access, cache tampering, interaction-required and revoked-consent states, host grant enforcement, initiator/session isolation, expiry/replay/disconnect, lifecycle drain/shutdown behavior, content-free logs/action results, and deterministic localization. The isolated host gate additionally executes cases against PostgreSQL 17 and the host's actual runtime SQL validators: concurrent cache CAS, controlled cache/disconnect lock interleaving, delayed provider completion after disconnect, and concurrent reconnect/disconnect generation rejection. Host lifecycle evidence requires the exact ordered migrations `001_scaffold_metadata.sql`, `002_auth_connections.sql`, and `003_atomic_cache_state.sql` plus `microsoftIntegration=connection-management`; missing, duplicate, reordered, or contradictory evidence fails closed.
 
 An actual Microsoft device-code sign-in, tenant policy, delegated consent, and real account identity remain unverified and require separate explicit authorization. Production installation, migration, deployment, restart, and Graph operations were not performed.
 
 ## Rollback
 
-Revert the WP02 commit before installation. If already installed in an approved non-production environment, disable the plugin before reverting the package and restore the pre-WP02 database backup. The additive `connections` and `token_caches` tables can remain unused; do not drop them as part of an application rollback without a separately approved data-retention decision.
+Revert the WP02 commit before installation. If already installed in an approved non-production environment, disable the plugin before reverting the package and restore the pre-WP02 database backup. Migration 003 does not support a package-only downgrade to the legacy cache store: restore the matching pre-upgrade database backup and encryption key together with the previous package. The additive `connections` and `token_caches` tables can remain unused; do not drop them as part of an application rollback without a separately approved data-retention decision.
 
 ## Remaining estimate after WP02
 

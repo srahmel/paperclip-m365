@@ -7,6 +7,11 @@ import { createM365Plugin } from "../src/plugin.js";
 import plugin from "../src/worker.js";
 
 describe("M365 plugin scaffold", () => {
+  const validConfig = {
+    microsoftClientId: "11111111-1111-4111-8111-111111111111",
+    signInScopes: ["User.Read"],
+    cacheEncryptionKey: { type: "secret_ref", secretId: "cache-key", version: "latest" },
+  };
   it("declares only the capabilities needed by its schema and settings entry", () => {
     expect(manifest).toMatchObject({
       id: "srahmel.m365",
@@ -35,7 +40,7 @@ describe("M365 plugin scaffold", () => {
   });
 
   it("exposes content-free connection-management status through the worker seam", async () => {
-    const harness = createTestHarness({ manifest });
+    const harness = createTestHarness({ manifest, config: validConfig });
     await plugin.definition.setup(harness.ctx);
 
     await expect(harness.getData("scaffold-status")).resolves.toEqual({
@@ -44,12 +49,144 @@ describe("M365 plugin scaffold", () => {
       microsoftIntegration: "connection-management",
     });
     await expect(plugin.definition.onHealth?.()).resolves.toEqual({
-      status: "ok",
-      message: "M365 connection management is ready",
+      status: "degraded",
+      message: "company_configuration_not_checked",
+      details: { configuration: "company_scoped", database: "reachable", microsoft: "unchecked" },
     });
     await expect(
       plugin.definition.onIdleDrain?.(new AbortController().signal),
     ).resolves.toBe("none");
+  });
+
+  it("keeps global health company-independent and installation unconfigured", async () => {
+    const harness = createTestHarness({ manifest });
+    const instance = createM365Plugin();
+    const config = vi.spyOn(harness.ctx.config, "get");
+    const secret = vi.spyOn(harness.ctx.secrets, "resolve");
+    await instance.definition.setup(harness.ctx);
+    await expect(instance.definition.onHealth?.()).resolves.toMatchObject({ status: "degraded", message: "company_configuration_not_checked" });
+    expect(config).not.toHaveBeenCalled();
+    expect(secret).not.toHaveBeenCalled();
+    expect(harness.dbQueries).toHaveLength(1);
+    expect(harness.dbQueries[0]?.sql).toContain("cache_authentication_tag");
+    vi.spyOn(harness.ctx.db, "query").mockRejectedValueOnce(new Error("private database endpoint"));
+    const health = await instance.definition.onHealth?.();
+    expect(health).toMatchObject({ status: "error", message: "database_unavailable" });
+    expect(JSON.stringify(health)).not.toContain("private database endpoint");
+  });
+
+  it("checks scoped readiness live without disclosing configuration, keys or backend errors", async () => {
+    const harness = createTestHarness({ manifest });
+    seedConnectionManagers(harness);
+    const instance = createM365Plugin();
+    await instance.definition.setup(harness.ctx);
+    const context = { companyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", actor: { type: "user" as const, userId: "user-a" } };
+    const config = vi.spyOn(harness.ctx.config, "get").mockImplementation(async (companyId) => {
+      expect(companyId).toBe(context.companyId);
+      return validConfig;
+    });
+    const secret = vi.spyOn(harness.ctx.secrets, "resolve").mockResolvedValue(Buffer.alloc(32, 7).toString("base64"));
+    const ready = () => harness.performAction("company-readiness", { companyId: "spoofed" }, context);
+    await expect(ready()).resolves.toEqual({ status: "ok", code: "local_prerequisites_ready", microsoft: "unchecked" });
+    expect(secret).toHaveBeenCalledWith(validConfig.cacheEncryptionKey, { companyId: context.companyId, configPath: "cacheEncryptionKey" });
+    for (const cacheEncryptionKey of ["plain-text-is-not-a-ref", { ...validConfig.cacheEncryptionKey, version: "current" }]) {
+      config.mockResolvedValueOnce({ ...validConfig, cacheEncryptionKey } as unknown as typeof validConfig);
+      secret.mockClear();
+      await expect(ready()).resolves.toMatchObject({ status: "degraded", code: "configuration_invalid" });
+      expect(secret).not.toHaveBeenCalled();
+    }
+    config.mockResolvedValueOnce({});
+    await expect(ready()).resolves.toMatchObject({ code: "configuration_invalid" });
+    secret.mockRejectedValueOnce(new Error("private secret backend"));
+    await expect(ready()).resolves.toMatchObject({ code: "key_unavailable" });
+    secret.mockResolvedValueOnce("not-a-valid-key");
+    await expect(ready()).resolves.toMatchObject({ code: "key_unavailable" });
+    vi.spyOn(harness.ctx.db, "query").mockRejectedValueOnce(new Error("private database endpoint"));
+    await expect(ready()).resolves.toMatchObject({ status: "error", code: "database_unavailable" });
+    await expect(ready()).resolves.toMatchObject({ status: "ok" });
+    config.mockClear();
+    await expect(harness.performAction("company-readiness", {}, { ...context, actor: { type: "user", userId: "user-without-grant" } })).rejects.toThrow("connection_management_forbidden");
+    expect(config).not.toHaveBeenCalled();
+    expect(JSON.stringify(harness.logs)).not.toMatch(/private|not-a-valid-key/);
+  });
+
+  it("allows database-only status and disconnect without Microsoft configuration", async () => {
+    const harness = createTestHarness({ manifest });
+    seedConnectionManagers(harness);
+    const instance = createM365Plugin();
+    await instance.definition.setup(harness.ctx);
+    const config = vi.spyOn(harness.ctx.config, "get");
+    const secret = vi.spyOn(harness.ctx.secrets, "resolve");
+    const context = { companyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", actor: { type: "user" as const, userId: "user-a" } };
+    const params = { connectionId: "11111111-1111-4111-8111-111111111111" };
+    // The default database fake contains no records; reaching not-found proves auth configuration did not gate access.
+    await expect(harness.performAction("connection-status", params, context)).rejects.toThrow("connection_not_found");
+    await expect(harness.performAction("disconnect", params, context)).rejects.toThrow("connection_not_found");
+    expect(config).not.toHaveBeenCalled();
+    expect(secret).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes database, authorization and unexpected action failures", async () => {
+    const harness = createTestHarness({ manifest });
+    seedConnectionManagers(harness);
+    const instance = createM365Plugin();
+    await instance.definition.setup(harness.ctx);
+    const context = { companyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", actor: { type: "user" as const, userId: "user-a" } };
+    const params = { connectionId: "11111111-1111-4111-8111-111111111111" };
+    vi.spyOn(harness.ctx.db, "query").mockRejectedValue(new Error("private-database-secret"));
+    await expect(harness.performAction("connection-status", params, context)).rejects.toThrow(/^storage_unavailable$/);
+    vi.spyOn(harness.ctx.access.members, "list").mockRejectedValueOnce(new Error("private-access-secret"));
+    await expect(harness.performAction("company-readiness", {}, context)).rejects.toThrow(/^authorization_unavailable$/);
+    const unexpected = createM365Plugin(async () => { throw new Error("private-factory-secret"); });
+    await unexpected.definition.setup(harness.ctx);
+    await expect(harness.performAction("connection-status", params, context)).rejects.toThrow(/^action_unavailable$/);
+    expect(JSON.stringify(harness.logs)).not.toContain("private-");
+  });
+
+  it("sanitizes unexpected scoped configuration failures", async () => {
+    const harness = createTestHarness({ manifest, config: validConfig });
+    seedConnectionManagers(harness);
+    const instance = createM365Plugin();
+    await instance.definition.setup(harness.ctx);
+    vi.spyOn(harness.ctx.config, "get").mockRejectedValue(new Error("private-config-secret"));
+    const result = await harness.performAction("company-readiness", {}, {
+      companyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", actor: { type: "user", userId: "user-a" },
+    });
+    expect(result).toEqual({ status: "degraded", code: "configuration_invalid", microsoft: "unchecked" });
+  });
+
+  it("reserves authentication capacity before database mutations and releases failed preparation", async () => {
+    const sessions = new AuthenticationSessionRegistry({ maxRetainedSessions: 1 });
+    const store = new ActionMemoryStore();
+    const manager = new ConnectionManager({
+      store,
+      provider: { async signIn() { throw new Error("unused"); }, async acquireToken() { throw new Error("unused"); } },
+      resolveCacheKey: async () => ({ value: Buffer.alloc(32, 7).toString("base64"), version: "test" }),
+    });
+    const instance = createM365Plugin(async () => manager, sessions);
+    const harness = createTestHarness({ manifest });
+    seedConnectionManagers(harness);
+    await instance.definition.setup(harness.ctx);
+    const context = { companyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", actor: { type: "user" as const, userId: "user-a" } };
+    const params = { connectionId: "11111111-1111-4111-8111-111111111111", expectedTenantId: "22222222-2222-4222-8222-222222222222", displayName: "Synthetic" };
+    let rejectPreparation!: (error: Error) => void;
+    const create = vi.spyOn(store, "create").mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectPreparation = reject; }));
+    const prepare = vi.spyOn(manager, "prepareReactivation");
+    const pending = harness.performAction("start-sign-in", params, context);
+    const rejected = expect(pending).rejects.toThrow(/^storage_unavailable$/);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    await expect(harness.performAction("start-sign-in", params, context)).rejects.toThrow(/^authentication_session_capacity$/);
+    await expect(harness.performAction("reactivate", params, context)).rejects.toThrow(/^authentication_session_capacity$/);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(prepare).not.toHaveBeenCalled();
+    rejectPreparation(new Error("private database detail"));
+    await rejected;
+    expect(sessions.idleState()).toBe("none");
+    const reservation = sessions.reserve();
+    reservation.release();
+    await sessions.shutdown();
+    await expect(harness.performAction("start-sign-in", params, context)).rejects.toThrow(/^authentication_shutdown$/);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("reports and shuts down plugin-owned authentication work through the SDK lifecycle", async () => {
@@ -161,11 +298,8 @@ describe("M365 plugin scaffold", () => {
       operationId: result.operationId,
       connectionId: result.connectionId,
       state: "completed",
-      challenge: {
-        verificationUri: "https://microsoft.example.test/device",
-        expiresAt: "2026-11-19T10:15:00.000Z",
-      },
     });
+    expect(session).not.toHaveProperty("challenge");
     expect(JSON.stringify(result)).not.toMatch(/synthetic-(?:access-token|secret-cache|device-code|key)/);
     expect(JSON.stringify(harness.logs)).not.toMatch(/synthetic-(?:access-token|secret-cache|device-code|key)/);
     expect(store.connections.get("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:11111111-1111-4111-8111-111111111111")?.companyId)

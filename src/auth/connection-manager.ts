@@ -13,6 +13,8 @@ export type ConnectionErrorCode =
   | "cache_invalid"
   | "consent_revoked"
   | "interaction_required"
+  | "storage_unavailable"
+  | "provider_unavailable"
   | "key_unavailable"
   | "tenant_mismatch";
 
@@ -113,7 +115,20 @@ export class ConnectionManager {
     now?: () => Date;
     trackOperation?: <T>(operation: () => Promise<T>) => Promise<T>;
   }) {
-    this.#store = dependencies.store;
+    // Never allow database-driver text (queries, connection strings, values) across this boundary.
+    const store = dependencies.store;
+    const safe = async <T>(operation: () => Promise<T>): Promise<T> => {
+      try { return await operation(); }
+      catch { throw new ConnectionAccessError("storage_unavailable"); }
+    };
+    this.#store = {
+      create: (...args) => safe(() => store.create(...args)),
+      find: (...args) => safe(() => store.find(...args)),
+      update: (...args) => safe(() => store.update(...args)),
+      readCache: (...args) => safe(() => store.readCache(...args)),
+      compareAndSwapCache: (...args) => safe(() => store.compareAndSwapCache(...args)),
+      disconnect: (...args) => safe(() => store.disconnect(...args)),
+    };
     this.#provider = dependencies.provider;
     this.#resolveCacheKey = dependencies.resolveCacheKey;
     this.#now = dependencies.now ?? (() => new Date());
@@ -192,7 +207,15 @@ export class ConnectionManager {
     onChallenge?: (challenge: { userCode: string; verificationUri: string; expiresAt: string }) => void,
     signal?: AbortSignal,
   ): Promise<ConnectionRecord> {
-    return this.#trackOperation(() => this.#signIn(connection, onChallenge, signal));
+    try {
+      return await this.#signIn(connection, onChallenge, signal);
+    } catch (error) {
+      if (error instanceof ConnectionAccessError && error.code === "storage_unavailable") {
+        // A total outage cannot persist its own diagnostic. Best effort only, generation guarded.
+        try { await this.#block(connection, "storage_unavailable"); } catch { /* preserve sanitized failure */ }
+      }
+      throw error;
+    }
   }
 
   async #signIn(
@@ -228,7 +251,8 @@ export class ConnectionManager {
         }
         throw new ConnectionAccessError(error.code);
       }
-      throw error;
+      await this.#block(connection, "provider_unavailable");
+      throw new ConnectionAccessError("provider_unavailable");
     }
     if (result.account.tenantId !== connection.expectedTenantId) {
       connection.status = "blocked";
@@ -338,7 +362,8 @@ export class ConnectionManager {
         }
         throw new ConnectionAccessError(error.code);
       }
-      throw error;
+      await this.#block(connection, "provider_unavailable");
+      throw new ConnectionAccessError("provider_unavailable");
     }
 
     const nextEnvelope = encryptCache(result.serializedCache, key, companyId, connectionId);
@@ -424,7 +449,7 @@ export function decryptCache(
   }
 }
 
-function decodeCacheKey(secret: string): Buffer {
+export function decodeCacheKey(secret: string): Buffer {
   if (!/^[A-Za-z0-9+/]{43}=$/.test(secret)) {
     throw new ConnectionAccessError("key_unavailable");
   }
