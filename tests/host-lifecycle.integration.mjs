@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { verifyArtifactFile } from "../scripts/package-integrity.mjs";
 
 const paperclipSource = process.env.PAPERCLIP_SOURCE;
 const packageRoot = process.env.PAPERCLIP_PACKAGE_ROOT;
+const packageArchive = process.env.PAPERCLIP_PACKAGE_ARCHIVE;
+const packageManifest = process.env.PAPERCLIP_PACKAGE_MANIFEST;
+const sourceRevision = process.env.PAPERCLIP_SOURCE_REVISION;
 assert(paperclipSource, "PAPERCLIP_SOURCE is required");
 assert(packageRoot, "PAPERCLIP_PACKAGE_ROOT is required");
+assert(packageArchive, "PAPERCLIP_PACKAGE_ARCHIVE is required");
+assert(packageManifest, "PAPERCLIP_PACKAGE_MANIFEST is required");
+assert(sourceRevision, "PAPERCLIP_SOURCE_REVISION is required");
 
 const fromPaperclip = (relativePath) => pathToFileURL(resolve(paperclipSource, relativePath)).href;
 const fromPackage = (relativePath) => pathToFileURL(resolve(packageRoot, relativePath)).href;
@@ -41,8 +48,39 @@ try {
   const lifecycle = lifecycleModule.pluginLifecycleManager(db, loader);
   const registry = registryModule.pluginRegistryService(db);
 
+  const assertPersistence = async (expectedPluginId, expectedStatus) => {
+    const current = await registry.getByKey("srahmel.m365");
+    assert(current, `plugin is missing in ${expectedStatus}`);
+    assert.equal(current.id, expectedPluginId, `${expectedStatus} changed the stable plugin record`);
+    assert.equal(current.status, expectedStatus);
+    assert.equal(current.lastError, null, `${expectedStatus} health contains an error`);
+
+    const migrationRows = await db.select().from(dbModule.pluginMigrations);
+    assert.equal(migrationRows.length, 1, `${expectedStatus} changed the migration ledger`);
+    assert.equal(migrationRows[0]?.migrationKey, "001_scaffold_metadata.sql");
+    assert.equal(migrationRows[0]?.status, "applied");
+
+    const namespaceRows = await db.select().from(dbModule.pluginDatabaseNamespaces);
+    assert.equal(namespaceRows.length, 1, `${expectedStatus} changed the namespace registration`);
+    assert.equal(namespaceRows[0]?.namespaceName, "plugin_m365_8b2a74e8fa");
+
+    const scaffoldRows = await databaseModule.pluginDatabaseService(db).query(
+      expectedPluginId,
+      "SELECT schema_version FROM plugin_m365_8b2a74e8fa.scaffold_metadata ORDER BY schema_version",
+      [],
+    );
+    assert.deepEqual(scaffoldRows, [{ schema_version: 1 }]);
+    return { current, migrationRows, namespaceRows };
+  };
+
   assert.equal(await registry.getByKey("srahmel.m365"), null, "plugin baseline is not empty");
 
+  await verifyArtifactFile({
+    artifactPath: packageArchive,
+    manifestPath: packageManifest,
+    expectedRevision: sourceRevision,
+    phase: "install",
+  });
   await loader.installPlugin({ localPath: packageRoot });
   const installed = await registry.getByKey("srahmel.m365");
   assert(installed, "plugin was not registered");
@@ -68,9 +106,22 @@ try {
   const disabled = await lifecycle.disable(installed.id, "WP01 isolated rollback drill");
   assert.equal(disabled.status, "disabled");
 
+  const reEnabled = await lifecycle.enable(installed.id);
+  assert.equal(reEnabled.status, "ready");
+  await assertPersistence(installed.id, "ready");
+
+  const disabledForRestore = await lifecycle.disable(installed.id, "WP01 soft-uninstall drill");
+  assert.equal(disabledForRestore.status, "disabled");
+
   const rolledBack = await lifecycle.unload(installed.id, false);
   assert.equal(rolledBack?.status, "uninstalled");
 
+  await verifyArtifactFile({
+    artifactPath: packageArchive,
+    manifestPath: packageManifest,
+    expectedRevision: sourceRevision,
+    phase: "restore",
+  });
   await loader.installPlugin({ localPath: packageRoot });
   const restoredInstalled = await registry.getByKey("srahmel.m365");
   assert(restoredInstalled, "plugin was not restored");
@@ -80,29 +131,20 @@ try {
   const restoredReady = await lifecycle.load(restoredInstalled.id);
   assert.equal(restoredReady.status, "ready");
 
-  const migrationRows = await db.select().from(dbModule.pluginMigrations);
-  assert.equal(migrationRows.length, 1, "restore reapplied or lost the migration ledger");
-  assert.equal(migrationRows[0]?.migrationKey, "001_scaffold_metadata.sql");
-  assert.equal(migrationRows[0]?.status, "applied");
-
-  const namespaceRows = await db.select().from(dbModule.pluginDatabaseNamespaces);
-  assert.equal(namespaceRows.length, 1, "restore changed the namespace registration");
-  assert.equal(namespaceRows[0]?.namespaceName, "plugin_m365_8b2a74e8fa");
-
-  const scaffoldRows = await databaseModule.pluginDatabaseService(db).query(
-    restoredInstalled.id,
-    "SELECT schema_version FROM plugin_m365_8b2a74e8fa.scaffold_metadata ORDER BY schema_version",
-    [],
-  );
-  assert.deepEqual(scaffoldRows, [{ schema_version: 1 }]);
+  const { migrationRows, namespaceRows } = await assertPersistence(restoredInstalled.id, "ready");
 
   console.log(JSON.stringify({
     check: "isolated-host-lifecycle",
     packageVersion: restoredInstalled.version,
-    states: ["absent", "installed", "ready", "disabled", "uninstalled", "installed", "ready"],
+    sourceRevision,
+    packageSha256VerifiedAt: ["install", "restore"],
+    states: ["absent", "installed", "ready", "disabled", "ready", "disabled", "uninstalled", "installed", "ready"],
     readOnlySmoke: "scaffold-status",
+    health: "ready",
     migrationCount: migrationRows.length,
     namespace: namespaceRows[0]?.namespaceName,
+    schemaVersion: 1,
+    reEnabledPluginIdStable: true,
     restoredPluginIdStable: true,
     microsoftCalls: 0,
   }));

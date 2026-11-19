@@ -21,8 +21,10 @@ npm run verify
 
 `npm run verify` checks the WP01A SDK/Shared/SRI pin, dependency licenses,
 project files for common secret patterns, TypeScript types, tests, all build
-entrypoints, and the packed artifact. The pack check prints the `.tgz` SHA-256
-and its complete file list.
+entrypoints, and the packed artifact. The pack check rejects source maps and
+sensitive filenames, then emits a revision-bound `.tgz` SHA-256 plus normalized
+per-file content hashes. CI compares the Linux and Windows manifests before it
+publishes the single hash-bound acceptance artifact.
 
 No credentials are required. Future configuration examples must use placeholders
 only; secrets belong in the Paperclip Secret Store.

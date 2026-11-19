@@ -50,16 +50,22 @@ erzeugt `dist/manifest.js`, `dist/worker.js` und `dist/ui/index.js`.
    alle 124 Lock-Einträge;
 3. Secret-Musterprüfung der Projektdateien;
 4. Typecheck und gezielte Tests;
-5. Build und `npm pack`;
-6. Paketinhalt, Manifest-, Worker- und UI-Entry-Point sowie SHA-256.
+5. Build und `npm pack` ohne Source-Maps oder eingebettete Quellen;
+6. Paketinhalt, Manifest-, Worker- und UI-Entry-Point sowie ein
+   revisionsgebundenes SHA-256-/Dateimanifest mit Pfad, Modus, Größe und
+   Inhalts-SHA-256 je Datei.
 
 Die CI-Matrix verwendet `ubuntu-24.04` und `windows-2025` mit Node `24.22.1`,
 npm `11.19.1` und Corepack `0.34.5`. Actions sind commit-gepinnt. Das bestehende
 isolierte Linux-Gate bleibt erhalten: digest-gepinnte Node-/PostgreSQL-Images,
 kein Netzwerk während der Zielausführung, read-only Quell-/Paket-Mounts,
 explizite Umgebung und Ressourcenlimits. Es baut zusätzlich das Plugin aus
-frischen Quellen, installiert das gepackte Artefakt und führt den Host-Lifecycle-
-Drill aus.
+frischen Quellen, prüft den erwarteten Paketdigest unmittelbar vor Installation
+und Restore und führt den Host-Lifecycle-Drill aus. Ein eigener Windows-2025-Job
+führt denselben Drill gegen den exakten Host-Pin und ein wegwerfbares Embedded
+PostgreSQL aus. Ein nachgelagerter Job lädt beide OS-Pakete herunter, vergleicht
+Archiv-SHA-256 und normalisierte Inhaltslisten fail-closed und veröffentlicht
+genau ein nach Commit und SHA-256 benanntes Abnahmeartefakt.
 
 ## Lokale Nachweise
 
@@ -69,15 +75,20 @@ Task-Scratch bereitgestelltem Corepack `0.34.5`:
 - Runnervertrag: Node `24.22.1`, npm `11.19.1`, Corepack `0.34.5`, Windows x64.
 - `npm ci --ignore-scripts`: 48 Pakete installiert, 0 bekannte npm-Auditbefunde.
 - Dependency-/Lizenzpolicy: 124/124 Lock-Einträge, vier WP01A-Pins geprüft.
-- Secret-Policy: 62 Dateien geprüft, 0 Befunde.
+- Secret-Policy: 65 Dateien geprüft, 0 Befunde.
 - Typecheck: PASS.
-- Vitest: 3 Testdateien, 4/4 Tests PASS.
+- Vitest: 3 Testdateien, 4/4 Tests PASS; zusätzliche Integritäts-/Paketpolicy:
+  4/4 Node-Tests PASS.
 - Build: Manifest, Worker und React-UI PASS.
-- Paket: zehn Dateien; keine Quellen, Tests, `.env`, npm-Konfiguration,
-  Credentials, Cookies, Sitzungen, Tokens oder `node_modules`.
+- Paket: sieben Dateien; keine Source-Maps, eingebetteten Quellen, Tests, `.env`,
+  npm-Konfiguration, Credentials, Cookies, Sitzungen, Tokens oder
+  `node_modules`. Übliche sensible Basisnamen mit Erweiterungen werden durch
+  automatisierte Negativfixtures abgedeckt.
 
-Finales lokales Artefakt: `paperclip-plugin-m365-0.1.0.tgz`, 495.040 Byte,
-SHA-256 `28cac002a10211e498168145712d43a6b52e517b68bc7e8b38bfb3fe5d9c7894`.
+Der endgültige Abnahmehash wird nicht als veränderliche Dokumentationskonstante
+geführt. Die CI bindet ihn an den geprüften Commit, vergleicht ihn zwischen
+Linux und Windows und schreibt ihn in `wp01-acceptance-manifest.json` sowie den
+Namen des einzigen Abnahmeartefakts.
 
 ## Isolierter Installations- und Restore-Drill
 
@@ -89,15 +100,22 @@ gepinnten Paperclip-Commits
 Embedded-Postgres-Instanz. Der saubere Pin-Checkout wird nicht verändert; der
 SDK-Laufzeitimport verweist auf das bereits SRI-geprüfte Registry-Artefakt.
 
-Belegte Zustandsfolge:
+Belegte Zustandsfolge auf demselben Datensatz:
 
-`absent → installed → ready → disabled → uninstalled → installed → ready`
+`absent → installed → ready → disabled → ready → disabled → uninstalled → installed → ready`
 
-Der inhaltsfreie Read-only-Smoke liest nur `scaffold-status`. Nach Restore sind
-Plugin-ID und Datensatz-ID stabil, genau eine Migration ist `applied`, der
-Namespace ist unverändert und die Tabelle enthält exakt Schema-Version 1.
-Microsoft-Aufrufe: 0. Der Drill startet keinen Produktivserver, kein Docker
-Desktop und keine externe Verbindung.
+Der Übergang `disabled → ready` verwendet ausdrücklich `enable(id)`, nicht
+Unload/Reinstallation. Bereits dort sowie erneut nach Restore sind Plugin-ID,
+fehlerfreier Health-Zustand, genau eine `applied`-Migration, Namespace und
+Schema-Version 1 unverändert. Der inhaltsfreie Read-only-Smoke liest nur
+`scaffold-status`. Microsoft-Aufrufe: 0. Der Drill startet keinen
+Produktivserver und lokal kein Docker Desktop.
+
+Das revisionsgebundene Manifest wird unmittelbar vor der ersten Host-
+Installation und unmittelbar vor Restore gegen die Archivbytes geprüft. Ein
+absichtlich falscher Digest wird für beide Phasen automatisiert abgewiesen. Die
+Windows- und Linux-Logs geben Zustandsfolge, Hashprüfpunkte, stabile ID,
+Migration, Namespace und Health maschinenlesbar aus.
 
 Grenze: Der Drill prüft Loader, Migrations- und Lifecycle-Persistenz sowie den
 gebauten Worker über die öffentliche SDK-Harness-Schnittstelle. Er ist keine
@@ -106,7 +124,8 @@ nicht zu WP01.
 
 ## Rückweg
 
-Vor Aktivierung wird der Pakethash geprüft. Der sichere lokale Rückweg ist:
+Vor Installation und Restore wird der revisionsgebundene Pakethash geprüft. Der
+sichere lokale Rückweg ist:
 
 1. Plugin deaktivieren;
 2. Soft-Uninstall, damit Plugin-ID, Schema und Migrationsledger erhalten bleiben;
@@ -141,3 +160,7 @@ freigegebenen Architekturstand unverändert:
 
 WP01 selbst benötigt nach grünem CI noch die vorgeschriebenen unabhängigen
 Reviews von Vera und Hagen; bis dahin ist WP02 gesperrt.
+
+Produktive Alarmrouten und der installationsseitige Host-/Versions-Preflight
+bleiben ausdrücklich spätere Gates aus WP04/WP10/WP11 und sind mit diesem WP01-
+Nachweis nicht als produktionsreif belegt.

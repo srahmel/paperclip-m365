@@ -15,9 +15,11 @@ source=/source
 tarballs=/tarballs
 packages=/packages/node_modules
 plugin_install=/plugin-installed
+plugin_artifact=/plugin-artifact/paperclip-plugin-m365-0.1.0.tgz
+plugin_manifest=/plugin-artifact/package-manifest.json
 scratch=/scratch
 
-for mount in "$repo" "$source" "$tarballs" "$packages" "$plugin_install"; do
+for mount in "$repo" "$source" "$tarballs" "$packages" "$plugin_install" /plugin-artifact; do
   options=$(findmnt -T "$mount" -n -o OPTIONS) || fail "cannot inspect mount: $mount"
   case ",$options," in *,ro,*) ;; *) fail "mount is not read-only: $mount ($options)" ;; esac
   if touch "$mount/.wp01-write-probe" 2>/dev/null; then fail "write unexpectedly succeeded: $mount"; fi
@@ -72,6 +74,9 @@ node --test --test-reporter=tap "$repo/experiments/wp00/install-log-policy.test.
 assert_tap_counts 18 "$scratch/install-policy.tap"
 
 export PAPERCLIP_PACKAGE_ROOT=$plugin_install/node_modules/paperclip-plugin-m365
+export PAPERCLIP_PACKAGE_ARCHIVE=$plugin_artifact
+export PAPERCLIP_PACKAGE_MANIFEST=$plugin_manifest
+export PAPERCLIP_SOURCE_REVISION=${WP01_SOURCE_REVISION:?WP01_SOURCE_REVISION is required}
 export PAPERCLIP_REGISTRY_ROOT=/packages
 export PAPERCLIP_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/paperclip_m365_wp01
 createdb -h 127.0.0.1 -U postgres paperclip_m365_wp01
@@ -83,4 +88,4 @@ dropdb -h 127.0.0.1 -U postgres paperclip_m365_wp01
 
 pg_ctl -D "$pgdata" -m fast -w stop >/dev/null
 trap - EXIT HUP INT TERM
-printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","sdkAssertions":"28/28","pluginLifecycle":"install-enable-smoke-disable-restore","gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'
+printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","sdkAssertions":"28/28","pluginLifecycle":"install-ready-disable-reenable-ready-disable-soft-uninstall-restore-ready","packageDigestVerifiedAt":["install","restore"],"gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'

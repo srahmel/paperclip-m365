@@ -27,7 +27,7 @@
     "check:secrets": "node ./scripts/check-secrets.mjs",
     "check:policy": "npm run check:dependencies && npm run check:secrets",
     "pack:verify": "node ./scripts/verify-pack.mjs",
-    "test": "vitest run --config ./vitest.config.ts",
+    "test": "vitest run --config ./vitest.config.ts && node --test ./tests/package-integrity.test.mjs",
     "typecheck": "tsc --noEmit",
     "verify": "npm run check:policy && npm run typecheck && npm test && npm run build && npm run pack:verify"
   },

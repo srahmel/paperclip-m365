@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { access, readFile } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createArtifactManifest } from "./package-integrity.mjs";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const npmCli = process.env.npm_execpath;
@@ -18,8 +18,6 @@ const [packed] = JSON.parse(raw);
 assert(packed?.filename, "npm pack did not report an artifact");
 
 const artifactPath = resolve(projectRoot, packed.filename);
-const artifact = await readFile(artifactPath);
-const sha256 = createHash("sha256").update(artifact).digest("hex");
 const files = packed.files.map((file) => file.path).sort();
 
 const requiredFiles = [
@@ -35,9 +33,16 @@ for (const requiredFile of requiredFiles) {
   assert(files.includes(requiredFile), `packed artifact is missing ${requiredFile}`);
 }
 
-const forbiddenPath = /(?:^|\/)(?:\.env(?:\.|$)|\.npmrc$|node_modules|src|tests?|credentials?|cookies?|sessions?|tokens?)(?:\/|$)/i;
-for (const file of files) {
-  assert(!forbiddenPath.test(file), `packed artifact contains forbidden path ${file}`);
+const sourceRevision = process.env.WP01_SOURCE_REVISION
+  ?? execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim();
+const artifactManifest = await createArtifactManifest({
+  artifactPath,
+  projectRoot,
+  packedFiles: packed.files,
+  sourceRevision,
+});
+if (process.env.WP01_PACKAGE_MANIFEST) {
+  await writeFile(process.env.WP01_PACKAGE_MANIFEST, `${JSON.stringify(artifactManifest, null, 2)}\n`, "utf8");
 }
 
 for (const entrypoint of ["dist/manifest.js", "dist/worker.js", "dist/ui/index.js"]) {
@@ -53,7 +58,8 @@ assert.equal(typeof uiModule.SettingsPage, "function", "packed UI entrypoint has
 console.log(JSON.stringify({
   check: "pack",
   filename: packed.filename,
-  sha256,
-  size: artifact.byteLength,
-  files,
+  sourceRevision,
+  sha256: artifactManifest.sha256,
+  size: artifactManifest.size,
+  files: artifactManifest.files,
 }, null, 2));

@@ -58,7 +58,7 @@ jobs:
             --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
             --mount "type=bind,src=${work},dst=/work" \
             wp01-runner:${GITHUB_SHA} \
-            /bin/bash /repo/experiments/wp00/ci/setup.sh /repo /work 2>&1 | tee "$evidence/setup.log"
+            /bin/bash /repo/experiments/wp00/ci/setup.sh /repo /work "$GITHUB_SHA" 2>&1 | tee "$evidence/setup.log"
           setup_status=${PIPESTATUS[0]}
           set -e
           if [ "$setup_status" -ne 0 ]; then
@@ -86,11 +86,13 @@ jobs:
             --mount "type=bind,src=${work}/tarballs,dst=/tarballs,readonly" \
             --mount "type=bind,src=${work}/packages,dst=/packages,readonly" \
             --mount "type=bind,src=${work}/plugin-installed,dst=/plugin-installed,readonly" \
+            --mount "type=bind,src=${work}/plugin-artifact,dst=/plugin-artifact,readonly" \
             --mount "type=bind,src=${work}/readonly-empty,dst=/var/lib/postgresql/data,readonly" \
             --mount "type=bind,src=${scratch},dst=/scratch" \
             --entrypoint /usr/bin/env wp01-runner:${GITHUB_SHA} -i \
             PATH=/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/bin:/bin \
             HOME=/scratch/home TMPDIR=/scratch LANG=C.UTF-8 \
+            WP01_SOURCE_REVISION="$GITHUB_SHA" \
             /usr/bin/timeout --signal=KILL 180s /bin/bash /repo/experiments/wp00/ci/run-full-gate.sh \
             2>&1 | tee "$evidence/full-gate.log"
           gate_status=${PIPESTATUS[0]}
@@ -140,5 +142,60 @@ jobs:
         with:
           name: wp01-isolated-gate-${{ github.sha }}
           path: ${{ runner.temp }}/wp01-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-x64:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact review commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+
+      - name: Use pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.22.1
+          registry-url: https://registry.npmjs.org
+
+      - name: Pin npm and Corepack without global mutation
+        shell: pwsh
+        run: |
+          npm install --prefix "$env:RUNNER_TEMP/wp01-tooling" --ignore-scripts npm@11.19.1 corepack@0.34.5
+          (Join-Path $env:RUNNER_TEMP 'wp01-tooling/node_modules/.bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify runner contract
+        run: npm run check:runner
+
+      - name: Run pinned Windows host lifecycle
+        shell: pwsh
+        run: |
+          & ./experiments/wp00/ci/run-windows-lifecycle.ps1 `
+            -Repo $env:GITHUB_WORKSPACE `
+            -Work (Join-Path $env:RUNNER_TEMP 'wp01-windows-lifecycle') `
+            -SourceRevision $env:GITHUB_SHA
+
+      - name: Publish Windows machine-readable evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP 'wp01-windows-lifecycle/evidence'
+          if (Test-Path -LiteralPath $evidence) {
+            Get-ChildItem -LiteralPath $evidence -File | ForEach-Object {
+              "## $($_.Name)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              '```text' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              Get-Content -LiteralPath $_.FullName | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+            }
+          }
+
+      - name: Upload Windows lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: wp01-windows-lifecycle-${{ github.sha }}
+          path: ${{ runner.temp }}/wp01-windows-lifecycle/evidence/
           if-no-files-found: error
           retention-days: 14
