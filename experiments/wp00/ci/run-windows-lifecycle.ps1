@@ -88,9 +88,15 @@ Remove-Item Env:PAPERCLIP_DATABASE_URL -ErrorAction SilentlyContinue
 $expected = Get-Content -Raw -LiteralPath (Join-Path $Repo 'experiments/wp00/expected-host-fingerprint.json') | ConvertFrom-Json
 $runner = Join-Path $source $expected.runner.relativeCliPath
 $tsxLoader = Join-Path (Split-Path -Parent $runner) 'loader.mjs'
+$registryLoader = Join-Path $Repo 'scripts/register-registry-sdk-pin.mjs'
+$importUrlsJson = & node -e "const { pathToFileURL } = require('node:url'); console.log(JSON.stringify(process.argv.slice(1).map((value) => pathToFileURL(value).href)))" `
+    $tsxLoader $registryLoader
+if ($LASTEXITCODE -ne 0) { throw 'Windows import URL conversion failed' }
+$importUrls = $importUrlsJson | ConvertFrom-Json
+if ($importUrls.Count -ne 2) { throw 'Windows import URL conversion returned an unexpected result' }
 
 $phase = 'run-host-lifecycle'
-& node --import $tsxLoader --import (Join-Path $Repo 'scripts/register-registry-sdk-pin.mjs') `
+& node --import $importUrls[0] --import $importUrls[1] `
     (Join-Path $Repo 'tests/host-lifecycle.integration.mjs') 2>&1 |
     Tee-Object -FilePath (Join-Path $evidence 'plugin-lifecycle.jsonl')
 if ($LASTEXITCODE -ne 0) { throw 'Windows host lifecycle failed' }
