@@ -119,15 +119,17 @@ absichtlich falscher Digest wird für beide Phasen automatisiert abgewiesen. Die
 Windows- und Linux-Logs geben Zustandsfolge, Hashprüfpunkte, stabile ID,
 Migration, Namespace und Health maschinenlesbar aus.
 
-Auf Windows ist die Evidence absichtlich getrennt: `plugin-lifecycle.stdout.jsonl`
-und die identische kanonische `plugin-lifecycle.jsonl` enthalten ausschließlich
-den vollständigen Lifecycle-Enddatensatz. `plugin-lifecycle.stderr.log` enthält
-die geordneten JSONL-Phasen `watchdog-armed`, `loader-start`, `host-initialized`,
-`database-lifecycle-start`, `database-started`, `lifecycle-complete` und den vom
-PowerShell-Runner ergänzten nativen `process-exit`-Marker. Auf einem erfolgreichen
-Lauf ist stderr deshalb nicht leer; nicht-JSON-Ausgabe, fehlende oder leere
-Dateien, falsche Reihenfolge, unvollständige Zustandsfolge und ein Exitcode ungleich
-`0` schlagen fail-closed fehl. Der Workflow veröffentlicht für jede Evidence-Datei
+Auf Windows ist die Evidence absichtlich getrennt: Das Harness schreibt nach den
+Assertions genau einen revisionsgebundenen Enddatensatz direkt nach
+`plugin-lifecycle.jsonl` und die geordneten Phasen `watchdog-armed`, `loader-start`,
+`host-initialized`, `database-lifecycle-start`, `database-started` und
+`lifecycle-complete` direkt nach `plugin-lifecycle.phases.jsonl`. Der PowerShell-
+Runner ergänzt dort den nativen `process-exit`-Marker. `plugin-lifecycle.stdout.log`
+und `plugin-lifecycle.stderr.log` bewahren die vollständige, ungefilterte
+Prozessausgabe einschließlich Host- und PostgreSQL-Logs. Der Validator liest nur
+die beiden kanonischen Dateien; fehlende oder leere Dateien, nicht-JSON-Inhalte,
+falsche Reihenfolge, unvollständige Zustandsfolge und ein Exitcode ungleich `0`
+schlagen fail-closed fehl. Der Workflow veröffentlicht für jede Evidence-Datei
 zusätzlich Bytezahl und SHA-256 in der Job-Zusammenfassung.
 
 Der fünfminütige Test-Watchdog hält als ausdrücklich referenzierter Node-Handle

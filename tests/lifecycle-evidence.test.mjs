@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { createLifecycleEvidenceWriter } from "../scripts/lifecycle-evidence-writer.mjs";
 import {
   assertLifecycleEvidence,
   verifyLifecycleEvidenceFiles,
@@ -98,4 +100,33 @@ test("file verification fails closed when evidence files are missing", async () 
     }),
     /ENOENT|no such file/i,
   );
+});
+
+test("harness writes canonical evidence independently from raw process logs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paperclip-lifecycle-writer-"));
+  const resultPath = join(root, "plugin-lifecycle.jsonl");
+  const phasePath = join(root, "plugin-lifecycle.phases.jsonl");
+  const rawResult = [];
+  const rawPhases = [];
+  try {
+    const writer = createLifecycleEvidenceWriter({
+      resultPath,
+      phasePath,
+      sourceRevision: revision,
+      writeRawResult: (line) => rawResult.push(`host log before result\n${line}`),
+      writeRawPhase: (line) => rawPhases.push(`host log before phase\n${line}`),
+    });
+    for (const phase of phases.slice(0, -1)) writer.emitPhase(phase.phase);
+    writer.writeResult(result);
+
+    assert.equal(await readFile(resultPath, "utf8"), `${JSON.stringify(result)}\n`);
+    assert.equal(
+      await readFile(phasePath, "utf8"),
+      `${jsonl(phases.slice(0, -1))}\n`,
+    );
+    assert.match(rawResult[0], /host log before result/u);
+    assert(rawPhases.every((line) => line.startsWith("host log before phase\n")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

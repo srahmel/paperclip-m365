@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { createLifecycleEvidenceWriter } from "../scripts/lifecycle-evidence-writer.mjs";
 import { verifyArtifactFile } from "../scripts/package-integrity.mjs";
 import { createLifecycleWatchdog } from "../scripts/lifecycle-watchdog.mjs";
 
@@ -15,11 +16,12 @@ assert(packageArchive, "PAPERCLIP_PACKAGE_ARCHIVE is required");
 assert(packageManifest, "PAPERCLIP_PACKAGE_MANIFEST is required");
 assert(sourceRevision, "PAPERCLIP_SOURCE_REVISION is required");
 
-const emitPhase = (phase) => console.error(JSON.stringify({
-  check: "isolated-host-lifecycle-phase",
-  phase,
+const evidenceWriter = createLifecycleEvidenceWriter({
+  resultPath: process.env.PAPERCLIP_LIFECYCLE_RESULT_PATH,
+  phasePath: process.env.PAPERCLIP_LIFECYCLE_PHASE_PATH,
   sourceRevision,
-}));
+});
+const emitPhase = (phase) => evidenceWriter.emitPhase(phase);
 
 const fromPaperclip = (relativePath) => pathToFileURL(resolve(paperclipSource, relativePath)).href;
 const fromPackage = (relativePath) => pathToFileURL(resolve(packageRoot, relativePath)).href;
@@ -147,7 +149,7 @@ try {
   const { migrationRows, namespaceRows } = await assertPersistence(restoredInstalled.id, "ready");
 
   emitPhase("lifecycle-complete");
-  console.log(JSON.stringify({
+  evidenceWriter.writeResult({
     check: "isolated-host-lifecycle",
     packageVersion: restoredInstalled.version,
     sourceRevision,
@@ -161,7 +163,7 @@ try {
     reEnabledPluginIdStable: true,
     restoredPluginIdStable: true,
     microsoftCalls: 0,
-  }));
+  });
 } finally {
   try {
     await temporary.cleanup();

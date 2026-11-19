@@ -94,9 +94,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Windows import URL conversion failed' }
 $importUrls = $importUrlsJson | ConvertFrom-Json
 if ($importUrls.Count -ne 2) { throw 'Windows import URL conversion returned an unexpected result' }
 
-$lifecycleStdout = Join-Path $evidence 'plugin-lifecycle.stdout.jsonl'
+$lifecycleStdout = Join-Path $evidence 'plugin-lifecycle.stdout.log'
 $lifecycleStderr = Join-Path $evidence 'plugin-lifecycle.stderr.log'
 $lifecycleEvidence = Join-Path $evidence 'plugin-lifecycle.jsonl'
+$lifecyclePhases = Join-Path $evidence 'plugin-lifecycle.phases.jsonl'
 $postgresBin = Join-Path $source 'node_modules/.pnpm/@embedded-postgres+windows-x64@18.1.0-beta.16/node_modules/@embedded-postgres/windows-x64/native/bin'
 $initdb = Join-Path $postgresBin 'initdb.exe'
 $pgCtl = Join-Path $postgresBin 'pg_ctl.exe'
@@ -129,6 +130,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'disposable PostgreSQL start failed' }
     $postgresStarted = $true
     $env:PAPERCLIP_DATABASE_URL = "postgresql://wp01_probe@127.0.0.1:$postgresPort/postgres"
+    $env:PAPERCLIP_LIFECYCLE_RESULT_PATH = $lifecycleEvidence
+    $env:PAPERCLIP_LIFECYCLE_PHASE_PATH = $lifecyclePhases
 
     $phase = 'run-host-lifecycle'
     Write-Output "::notice title=Windows lifecycle phase::$phase - starting node with 2 file URL imports"
@@ -142,22 +145,25 @@ try {
         sourceRevision = $SourceRevision
         exitCode = $lifecycleExitCode
     } | ConvertTo-Json -Compress
-    Add-Content -LiteralPath $lifecycleStderr -Value $exitMarker -Encoding utf8
-    Copy-Item -LiteralPath $lifecycleStdout -Destination $lifecycleEvidence
+    Add-Content -LiteralPath $lifecyclePhases -Value $exitMarker -Encoding utf8
     Get-Content -LiteralPath $lifecycleStdout | Write-Output
     Get-Content -LiteralPath $lifecycleStderr | Write-Output
+    Get-Content -LiteralPath $lifecycleEvidence | Write-Output
+    Get-Content -LiteralPath $lifecyclePhases | Write-Output
     Write-Output "::notice title=Windows lifecycle phase::$phase - node exit code $lifecycleExitCode"
     if ($lifecycleExitCode -ne 0) { throw "Windows host lifecycle failed with exit code $lifecycleExitCode" }
 
     $lifecycle = Get-Content -Raw -LiteralPath $lifecycleEvidence
     if ([string]::IsNullOrWhiteSpace($lifecycle)) { throw 'Windows lifecycle evidence is empty' }
-    $lifecyclePhases = Get-Content -Raw -LiteralPath $lifecycleStderr
-    if ([string]::IsNullOrWhiteSpace($lifecyclePhases)) { throw 'Windows lifecycle phase evidence is empty' }
+    $phaseEvidence = Get-Content -Raw -LiteralPath $lifecyclePhases
+    if ([string]::IsNullOrWhiteSpace($phaseEvidence)) { throw 'Windows lifecycle phase evidence is empty' }
     & node (Join-Path $Repo 'scripts/lifecycle-evidence.mjs') `
-        $lifecycleEvidence $lifecycleStderr $SourceRevision
+        $lifecycleEvidence $lifecyclePhases $SourceRevision
     if ($LASTEXITCODE -ne 0) { throw 'Windows lifecycle evidence is invalid' }
 } finally {
     Remove-Item Env:PAPERCLIP_DATABASE_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:PAPERCLIP_LIFECYCLE_RESULT_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PAPERCLIP_LIFECYCLE_PHASE_PATH -ErrorAction SilentlyContinue
     if ($postgresStarted) {
         $phase = 'stop-disposable-postgresql'
         & $pgCtl -D $postgresData stop -m fast -w
