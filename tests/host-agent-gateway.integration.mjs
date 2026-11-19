@@ -39,9 +39,13 @@ const { pluginRoutes } = await hostImport("server/src/routes/plugins.ts");
 const { actorMiddleware } = await hostImport("server/src/middleware/auth.ts");
 const { errorHandler } = await hostImport("server/src/middleware/error-handler.ts");
 const { createLocalAgentJwt } = await hostImport("server/src/agent-auth-jwt.ts");
+const { boardAuthService } = await hostImport("server/src/services/board-auth.ts");
+const { pluginJobStore } = await hostImport("server/src/services/plugin-job-store.ts");
+const { createPluginJobScheduler } = await hostImport("server/src/services/plugin-job-scheduler.ts");
+const { PluginWatchdog } = await import(pathToFileURL(resolve(packageRoot, "dist/watchdog.js")).href);
 const previousSecret = process.env.PAPERCLIP_AGENT_JWT_SECRET;
 process.env.PAPERCLIP_AGENT_JWT_SECRET = randomBytes(32).toString("hex");
-let workerManager, workerHandle, dispatcher, services, server, db;
+let workerManager, workerHandle, dispatcher, services, scheduler, server, db;
 let receipt;
 let success = false;
 try {
@@ -86,11 +90,15 @@ try {
   await db.insert(D.toolProfileEntries).values({ id: entryId, companyId, profileId, selectorType: "tool_name", toolName: tool, effect: "include" });
   await db.insert(D.toolProfileBindings).values({ companyId, profileId, targetType: "agent", targetId: agentId });
   const gateway = createToolGatewayService(db, { pluginToolDispatcher: dispatcher, deploymentMode: "authenticated", deploymentExposure: "private" });
+  const jobStore = pluginJobStore(db);
+  await jobStore.syncJobDeclarations(plugin.id, manifest.jobs);
+  scheduler = createPluginJobScheduler({ db, jobStore, workerManager, jobTimeoutMs: 30_000 });
+  await scheduler.registerPlugin(plugin.id);
   const app = express(); app.use(express.json({ limit: "1mb" }));
   app.use(actorMiddleware(db, { deploymentMode: "authenticated" }));
   let lastActor;
   app.use((req, _res, next) => { lastActor = req.actor; next(); });
-  app.use("/api", pluginRoutes(db, loader, undefined, undefined, { toolDispatcher: dispatcher }, { workerManager }, { toolGateway: gateway }));
+  app.use("/api", pluginRoutes(db, loader, { scheduler, jobStore }, undefined, { toolDispatcher: dispatcher }, { workerManager }, { toolGateway: gateway }));
   app.use(errorHandler);
   server = await new Promise(resolveServer => { const listener = app.listen(0, "127.0.0.1", () => resolveServer(listener)); });
   const address = server.address(); assert(address && typeof address === "object");
@@ -102,8 +110,17 @@ try {
       body: JSON.stringify({ tool, parameters: { connectionId }, runContext: context }), signal: AbortSignal.timeout(30_000) });
     return { status: response.status, body: await response.json() };
   }
+  function workerResult(response) {
+    assert.equal(response.status, 200, "expected successful gateway HTTP envelope");
+    assert.equal(response.body.pluginId, "srahmel.m365", "unexpected gateway plugin identity");
+    assert.equal(response.body.toolName, "connection-get-status", "unexpected gateway tool identity");
+    assert(response.body.result && typeof response.body.result === "object" && !Array.isArray(response.body.result), "missing worker result envelope");
+    return response.body.result;
+  }
   const allowed = await call();
-  assert.equal(allowed.status, 200); assert.deepEqual(allowed.body.data, { connectionId, status: "connected" });
+  const allowedResult = workerResult(allowed);
+  assert.equal(allowedResult.error, undefined, "allowed worker result must not contain an error");
+  assert.deepEqual(allowedResult.data, { connectionId, status: "connected" });
   assert.equal(lastActor.type, "agent"); assert.equal(lastActor.source, "agent_jwt"); assert.equal(lastActor.runId, runId);
   assert.equal(workerDispatches, 1);
   const invocations = await db.select().from(D.toolInvocations).where(eq(D.toolInvocations.companyId, companyId));
@@ -112,7 +129,7 @@ try {
   const deniedHost = await call(); assert.equal(deniedHost.status, 403); assert.equal(workerDispatches, 1);
   await db.insert(D.toolProfileEntries).values({ id: entryId, companyId, profileId, selectorType: "tool_name", toolName: tool, effect: "include" });
   await pluginDb.execute(plugin.id, "UPDATE plugin_m365_8b2a74e8fa.connections SET policy_bindings='[]'::jsonb WHERE company_id=$1 AND id=$2", [companyId, connectionId]);
-  const deniedPlugin = await call(); assert.equal(deniedPlugin.status, 200); assert.equal(deniedPlugin.body.error, "permission_denied"); assert.equal(workerDispatches, 2);
+  const deniedPlugin = await call(); assert.equal(deniedPlugin.status, 200); assert.equal(workerResult(deniedPlugin).error, "permission_denied"); assert.equal(workerDispatches, 2);
   for (const field of ["companyId", "agentId", "runId", "projectId"]) {
     const spoofed = await call({ context: { ...runContext, [field]: randomUUID() } });
     assert.equal(spoofed.status, 403); assert.equal(workerDispatches, 2);
@@ -120,15 +137,58 @@ try {
   const badJwt = await call({ token: "synthetic-invalid-token" }); assert.equal(badJwt.status, 401); assert.equal(workerDispatches, 2);
   await db.update(D.heartbeatRuns).set({ status: "succeeded" }).where(eq(D.heartbeatRuns.id, runId));
   const inactive = await call(); assert.equal(inactive.status, 403); assert.equal(workerDispatches, 2);
+  // Authenticate a synthetic human using the actual host board-key lookup.
+  // Do not inject req.actor or a fake session resolver into the HTTP middleware.
+  const humanId = randomUUID();
+  await db.insert(D.authUsers).values({ id: humanId, name: "Synthetic monitor", email: "wp10-monitor@example.invalid", createdAt: new Date(), updatedAt: new Date() });
+  await db.insert(D.instanceUserRoles).values({ userId: humanId, role: "instance_admin" });
+  const boardKey = await boardAuthService(db).createNamedBoardApiKey({ userId: humanId, name: "Synthetic monitor", expiresAt: new Date(Date.now() + 60_000) });
+  const evaluation = await jobStore.getJobByKey(plugin.id, "telemetry-evaluate"); assert(evaluation);
+  const job = await scheduler.triggerJob(evaluation.id);
+  const jobDeadline = Date.now() + 30_000;
+  let completed;
+  do {
+    completed = await jobStore.getRunById(job.runId);
+    if (["succeeded", "failed", "cancelled"].includes(completed?.status)) break;
+    assert(Date.now() < jobDeadline, "actual telemetry job did not complete within deadline");
+    await new Promise(resolveWait => setTimeout(resolveWait, 50));
+  } while (true);
+  assert.equal(completed.status, "succeeded", "actual telemetry evaluation must succeed");
+  const workerHealth = await workerManager.call(plugin.id, "health", {});
+  assert.equal(workerHealth.status, "degraded");
+  assert.equal(workerHealth.message, "company_configuration_not_checked");
+  const dashboardUrl = `http://127.0.0.1:${address.port}/api/plugins/${plugin.id}/dashboard`;
+  const dashboardResponse = await fetch(dashboardUrl, { headers: { authorization: `Bearer ${boardKey.token}` }, signal: AbortSignal.timeout(30_000) });
+  assert.equal(dashboardResponse.status, 200);
+  const dashboard = await dashboardResponse.json();
+  assert.equal(lastActor.type, "board"); assert.equal(lastActor.source, "board_key");
+  assert.equal(dashboard.health.status, "ready"); assert.equal(dashboard.health.healthy, true);
+  assert.equal(dashboard.worker.status, "running");
+  assert(dashboard.recentJobRuns.some(run => run.id === job.runId && run.jobKey === "telemetry-evaluate" && run.status === "succeeded"));
+  let alarms = 0;
+  const monitor = new PluginWatchdog({ hostOrigin: new URL(dashboardUrl).origin, pluginId: plugin.id,
+    alarm: async () => { alarms++; }, http: { async get(input) {
+      assert.equal(input.url, dashboardUrl);
+      const response = await fetch(input.url, { headers: { authorization: `Bearer ${boardKey.token}` }, redirect: input.redirect, signal: input.signal });
+      const reader = response.body?.getReader(); assert(reader); let size = 0; const chunks = [];
+      while (true) { const chunk = await reader.read(); if (chunk.done) break;
+        size += chunk.value.length; if (size > input.maxBytes) { await reader.cancel(); throw new Error("bounded dashboard response exceeded"); } chunks.push(chunk.value); }
+      return { status: response.status, url: response.url, body: Buffer.concat(chunks) };
+    } } });
+  assert.equal((await monitor.checkOnce()).code, "healthy"); assert.equal(alarms, 0);
+  const unauthenticated = await fetch(dashboardUrl, { signal: AbortSignal.timeout(30_000) });
+  assert.equal(unauthenticated.status, 403);
   await workerManager.stopWorker(plugin.id);
   assert.equal(workerManager.isRunning(plugin.id), false);
   receipt = { probe: "wp10-authenticated-agent-gateway", check: "isolated-authenticated-agent-gateway", status: "pass", hostRevision, currentSourceRevision: artifact.sourceRevision, packageSha256: artifact.sha256,
     pluginWorker: "actual-package-worker", authentication: "signed-agent-jwt-http", gateway: "actual-host-policy-and-postgres",
     allowed: 1, hostDenied: 1, pluginDenied: 1, spoofedContextsDenied: 4, invalidJwtDenied: 1, inactiveRunDenied: 1,
+    dashboardRegression: { authentication: "board_key", workerHealth: "degraded", hostHealth: "ready", telemetryEvaluation: "succeeded", watchdog: "healthy", alarms: 0 },
     workerDispatches, microsoftCalls: 0, scope: "synthetic-run-record-not-llm-adapter-run" };
   success = true;
 } finally {
   if (server) await new Promise((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
+  scheduler?.stop();
   await workerManager?.stopAll(); dispatcher?.teardown(); services?.dispose();
   if (workerHandle) assert.equal(workerHandle.status, "stopped", "actual child worker must be stopped");
   if (server) assert.equal(server.listening, false, "loopback listener must be closed");

@@ -4,11 +4,12 @@ Package name: `paperclip-plugin-m365`
 
 Plugin ID: `srahmel.m365`
 
-The current WP03 package adds agent permissions, immutable human approvals,
-and a separately reserved execution foundation to the installable TypeScript
-plugin. Authentication uses an MSAL provider,
+The development package implements Mail, Calendar and OneDrive domain tools,
+agent permissions, immutable human approvals and separately reserved execution.
+Authentication uses an MSAL provider,
 an encrypted versioned cache, host-authenticated administration actions, a
-React settings entrypoint, and additive plugin-owned schema migrations. It does
+React settings entrypoint, and plugin-owned schema migrations with version-bound
+recovery requirements. It does
 not perform a real Microsoft sign-in or any Graph mail, calendar, or OneDrive
 operation as part of verification.
 
@@ -36,7 +37,7 @@ publishes the single hash-bound acceptance artifact.
 No credentials are required. Future configuration examples must use placeholders
 only; secrets belong in the Paperclip Secret Store.
 
-## Planned capabilities
+## Development capabilities
 
 WP04 provides the Graph transport, content-free monitoring, private-result
 retention and independent watchdog foundations. Domain tools now connect mail,
@@ -51,6 +52,11 @@ installation has been exercised.
 | OneDrive | List/read/download, create folders/files, rename, recycle files; content replacement and folder deletion fail closed |
 | Access | Explicit agent assignments for private and shared connections |
 | Approval | Permission-checked reads; concrete human approval before mutations |
+
+The [development delivery decision](docs/decisions/0002-development-delivery-boundary.md)
+explicitly defers content replacement and folder deletion. Those original WP08
+requirements remain unfulfilled. Development validation is separate from full
+product acceptance, an actual Microsoft pilot and production release.
 
 ## Design and evidence
 

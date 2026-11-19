@@ -22,7 +22,7 @@ Required environment:
 - WP01_SOURCE_REVISION: exact 40-character current source commit; GITHUB_SHA is
   accepted as the CI fallback.
 - WP11_PG_DUMP and WP11_PG_RESTORE: explicit absolute paths to the CI PostgreSQL
-  binaries (Linux PostgreSQL17 bin directory or the existing Windows runner bin).
+  binaries (Linux PostgreSQL17 bin directory or the complete Windows runner PGBIN).
 - WP11_BACKUP_PATH: explicit absolute custom-archive filename in the existing CI
   artifact/scratch directory. Its parent directory must already exist. No default
   location or live database discovery is used.
@@ -66,6 +66,23 @@ Command arguments use execFile directly, without a shell; subprocess errors are
 replaced with a fixed diagnostic so connection-string arguments cannot enter logs.
 Both pg tools have a bounded60-second timeout. The archive is synthetic test data;
 the test does not automatically publish it as an artifact.
+
+The Windows runner uses its complete `PGBIN` toolchain for the fresh disposable
+server and every client tool. It reads the existing runner contract's
+`windows.postgresqlMajor` (17), checks all seven binaries before initdb, requires
+one matching normalized version and records fixed tool/version evidence. It never
+starts or uses the runner's pre-existing database service/data directory. The
+embedded host dependency remains pinned independently; its Windows package only
+contains initdb/pg_ctl/postgres, so it cannot supply dump/restore/createdb/dropdb.
+The previous archive failure was a missing executable (ENOENT), not a database or
+archive incompatibility. Mixing the complete17 clients with the embedded18 server
+is explicitly avoided.
+
+Subprocess failure evidence contains only the fixed tool name, an allowlisted spawn
+code or numeric exit status, and a killed boolean. Lifecycle errors retain their
+original phase even if PostgreSQL shutdown also fails; cleanup failure is reported
+separately. Raw exception messages, arguments, database URLs and stderr are not
+included in these diagnostic records.
 
 The tests establish these boundaries when they pass in CI:
 

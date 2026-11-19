@@ -7,9 +7,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $phase = 'initialize'
 trap {
-    $detail = ($_.Exception.Message -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A')
-    Write-Output "::error title=Windows lifecycle failed::$phase - $detail"
+    Write-Output "::error title=Windows lifecycle failed::$phase - lifecycle_phase_failed"
     exit 1
+}
+function ConvertTo-PostgresVersion([string]$Output, [string]$ExpectedMajor) {
+    if ($Output -notmatch '^\S+ \(PostgreSQL\) (?<version>\d+\.\d+(?:\.\d+)?)$') { throw 'postgresql_version_invalid' }
+    $version = $Matches.version
+    if ($version.Split('.')[0] -ne $ExpectedMajor) { throw 'postgresql_major_mismatch' }
+    return $version
 }
 function Assert-TapCounts([string]$Path, [int]$Count) {
     $lines = Get-Content -LiteralPath $Path
@@ -120,12 +125,32 @@ $lifecycleStdout = Join-Path $evidence 'plugin-lifecycle.stdout.log'
 $lifecycleStderr = Join-Path $evidence 'plugin-lifecycle.stderr.log'
 $lifecycleEvidence = Join-Path $evidence 'plugin-lifecycle.jsonl'
 $lifecyclePhases = Join-Path $evidence 'plugin-lifecycle.phases.jsonl'
-$postgresBin = Join-Path $source 'node_modules/.pnpm/@embedded-postgres+windows-x64@18.1.0-beta.16/node_modules/@embedded-postgres/windows-x64/native/bin'
+$phase = 'verify-postgresql-toolchain'
+$runnerContract = Get-Content -LiteralPath (Join-Path $Repo 'experiments/wp00/runner-contract.json') -Raw | ConvertFrom-Json
+$postgresMajor = [string]$runnerContract.windows.postgresqlMajor
+if ($postgresMajor -notmatch '^\d+$') { throw 'postgresql_contract_invalid' }
+$postgresBin = $env:PGBIN
+if (-not $postgresBin -or -not [System.IO.Path]::IsPathFullyQualified($postgresBin) -or -not (Test-Path -LiteralPath $postgresBin -PathType Container)) { throw 'postgresql_bin_unavailable' }
+$toolVersion = $null
+$versionEvidence = Join-Path $evidence 'postgresql-tools.jsonl'
+foreach ($tool in @('initdb', 'pg_ctl', 'postgres', 'pg_dump', 'pg_restore', 'createdb', 'dropdb')) {
+    $phase = "verify-postgresql-$tool"
+    $executable = Join-Path $postgresBin "$tool.exe"
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw 'postgresql_tool_missing' }
+    $output = & $executable --version 2>$null
+    if ($LASTEXITCODE -ne 0) { throw 'postgresql_version_probe_failed' }
+    $version = ConvertTo-PostgresVersion (($output -join "`n").Trim()) $postgresMajor
+    if ($null -ne $toolVersion -and $toolVersion -ne $version) { throw 'postgresql_toolchain_mixed_versions' }
+    $toolVersion = $version
+    [ordered]@{ probe = 'postgresql-tool-version'; tool = $tool; version = $version; requiredMajor = $postgresMajor } |
+        ConvertTo-Json -Compress | Tee-Object -FilePath $versionEvidence -Append
+}
 $initdb = Join-Path $postgresBin 'initdb.exe'
 $pgCtl = Join-Path $postgresBin 'pg_ctl.exe'
 $postgresData = Join-Path $Work 'postgres-data'
 $postgresLog = Join-Path $evidence 'postgresql.log'
 $postgresStarted = $false
+$primaryFailure = $false
 
 foreach ($executable in @($initdb, $pgCtl)) {
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
@@ -227,6 +252,10 @@ try {
     if (-not (Select-String -LiteralPath $agentEvidence -SimpleMatch '"check":"isolated-authenticated-agent-gateway"' -Quiet)) { throw 'agent gateway evidence missing' }
     & (Join-Path $postgresBin 'dropdb.exe') -h 127.0.0.1 -p $postgresPort -U wp01_probe paperclip_m365_agent_gateway
     if ($LASTEXITCODE -ne 0) { throw 'disposable agent gateway database cleanup failed' }
+} catch {
+    # Preserve the operation phase. Cleanup must not overwrite its diagnosis.
+    $primaryFailure = $true
+    Write-Output "::error title=Windows lifecycle primary failure::$phase - lifecycle_phase_failed"
 } finally {
     Remove-Item Env:PAPERCLIP_DATABASE_URL -ErrorAction SilentlyContinue
     Remove-Item Env:WP00_DATABASE_URL -ErrorAction SilentlyContinue
@@ -238,11 +267,16 @@ try {
     Remove-Item Env:PAPERCLIP_LIFECYCLE_RESULT_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:PAPERCLIP_LIFECYCLE_PHASE_PATH -ErrorAction SilentlyContinue
     if ($postgresStarted) {
-        $phase = 'stop-disposable-postgresql'
-        & $pgCtl -D $postgresData stop -m fast -w
-        if ($LASTEXITCODE -ne 0) { throw 'disposable PostgreSQL stop failed' }
+        try {
+            & $pgCtl -D $postgresData stop -m fast -w
+            if ($LASTEXITCODE -ne 0) { throw 'postgresql_stop_failed' }
+        } catch {
+            Write-Output '::error title=Windows lifecycle cleanup failure::stop-disposable-postgresql - postgresql_stop_failed'
+            if (-not $primaryFailure) { $phase = 'stop-disposable-postgresql'; $primaryFailure = $true }
+        }
     }
 }
+if ($primaryFailure) { exit 1 }
 
 [ordered]@{
     probe = 'wp01-windows-host-lifecycle'
@@ -250,6 +284,7 @@ try {
     sourceRevision = $SourceRevision
     hostCommit = 'd69631b01b9c658f80bf8bed389863dce82643e1'
     database = 'disposable-loopback-postgresql'
+    postgresqlVersion = $toolVersion
     syntheticDataOnly = $true
     wp02PostgresAssertions = '6/6'
     wp03PostgresAssertions = '11/11'

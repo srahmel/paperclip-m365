@@ -1,7 +1,7 @@
 {
   "name": "paperclip-plugin-m365",
   "version": "0.1.0",
-  "description": "Paperclip plugin scaffold for Microsoft 365",
+  "description": "Governed Microsoft 365 tools for Paperclip",
   "type": "module",
   "license": "MIT",
   "author": "Encurio GmbH",
@@ -20,6 +20,7 @@
     "docs/wp11-recovery.md",
     "docs/wp10-agent-boundary.md",
     "docs/wp09-ui-validation.md",
+    "docs/decisions/0002-development-delivery-boundary.md",
     "LICENSE",
     "README.md"
   ],

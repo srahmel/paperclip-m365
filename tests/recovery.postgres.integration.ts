@@ -53,11 +53,18 @@ let backup: LogicalBackup, backupHash: string;
 let archiveHash: string, archiveSize: number;
 let currentPackage: { sourceRevision: string; sha256: string };
 let externalCalls = 0;
-async function pgTool(binary: string, args: string[]) {
+async function pgTool(tool: "pg_dump" | "pg_restore", binary: string, args: string[]) {
   // execFile uses argv directly; never print its error object, command, or stderr,
   // which may embed a connection string. Only fixed diagnostics leave this helper.
   try { await runFile(binary, args, { windowsHide: true, timeout: 60_000, maxBuffer: 256 * 1024 }); }
-  catch { throw new Error("isolated PostgreSQL archive tool failed"); }
+  catch (error) {
+    const failure = error as { code?: unknown; killed?: unknown };
+    const spawnCodes = ["ENOENT", "EACCES", "EPERM", "ETIMEDOUT", "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"];
+    const code = typeof failure.code === "number" && Number.isSafeInteger(failure.code) ? failure.code
+      : typeof failure.code === "string" && spawnCodes.includes(failure.code) ? failure.code : "UNKNOWN";
+    process.stderr.write(JSON.stringify({ probe: "isolated-postgresql-tool-failure", tool, code, killed: failure.killed === true }) + "\n");
+    throw new Error("isolated PostgreSQL archive tool failed");
+  }
 }
 function service(resolveKey = async () => key) {
   return new GovernanceService({ store, resolveKey, authorizeAgent: async () => true, authorizeApprover: async () => true, executor: async () => { externalCalls++; return { state: "succeeded", result: null }; } });
@@ -120,7 +127,7 @@ before(async () => {
   }
   backup = await exportRows(); backupHash = sha(JSON.stringify(backup));
   assert(!JSON.stringify(backup).includes("recovery-content-canary")); assert(!JSON.stringify(backup).includes(key.value));
-  await pgTool(dumpBinary, ["--format=custom", `--schema=${namespace}`, `--file=${backupPath}`, "--no-owner", "--no-privileges", `--dbname=${databaseUrl}`]);
+  await pgTool("pg_dump", dumpBinary, ["--format=custom", `--schema=${namespace}`, `--file=${backupPath}`, "--no-owner", "--no-privileges", `--dbname=${databaseUrl}`]);
   const archive = await readFile(backupPath); archiveHash = sha(archive); archiveSize = archive.byteLength;
   assert(archiveSize > 0); assert.equal(archive.subarray(0, 5).toString(), "PGDMP");
 });
@@ -178,7 +185,7 @@ test("actual custom pg_dump archive restores schema/data/key bindings without re
   // Only the fixed plugin schema in the required disposable CI database is removed.
   // pg_restore recreates the schema from the archive; no --clean across the database.
   await client.unsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
-  await pgTool(restoreBinary, ["--exit-on-error", "--single-transaction", "--no-owner", "--no-privileges", `--dbname=${databaseUrl}`, backupPath]);
+  await pgTool("pg_restore", restoreBinary, ["--exit-on-error", "--single-transaction", "--no-owner", "--no-privileges", `--dbname=${databaseUrl}`, backupPath]);
   assert.equal(sha(JSON.stringify(await exportRows())), backupHash, "pg_restore rows differ from the seeded schema004 snapshot");
   const rows = await client.unsafe(`SELECT id,state,executor_nonce,snapshot_hash,snapshot_envelope FROM "${namespace}".operations`);
   for (const row of rows) {
