@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test, { after, before } from "node:test";
 
 import {
@@ -27,6 +27,7 @@ const postgresModule = requireFromPaperclipDb("postgres");
 const postgres = postgresModule.default ?? postgresModule;
 const sql = postgres(databaseUrl, { max: 8, idle_timeout: 1 });
 const namespace = "plugin_m365_8b2a74e8fa";
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
 const envelope: EncryptedCache = {
   algorithm: "aes-256-gcm",
@@ -88,7 +89,7 @@ before(async () => {
   await sql.unsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
   await sql.unsafe(`CREATE SCHEMA "${namespace}"`);
   for (const migration of ["001_scaffold_metadata.sql", "002_auth_connections.sql"]) {
-    await sql.unsafe(await readFile(resolve("migrations", migration), "utf8"));
+    await sql.unsafe(await readFile(resolve(repositoryRoot, "migrations", migration), "utf8"));
   }
 });
 
