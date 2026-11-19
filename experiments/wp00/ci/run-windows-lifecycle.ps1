@@ -111,9 +111,9 @@ Write-Output "::notice title=Windows lifecycle phase::$phase - node exit code $l
 if ($lifecycleExitCode -ne 0) { throw "Windows host lifecycle failed with exit code $lifecycleExitCode" }
 
 $lifecycle = Get-Content -Raw -LiteralPath $lifecycleEvidence
-if ($lifecycle -notmatch '"check":"isolated-host-lifecycle"') {
-    throw 'Windows lifecycle evidence is missing'
-}
+if ([string]::IsNullOrWhiteSpace($lifecycle)) { throw 'Windows lifecycle evidence is empty' }
+& node (Join-Path $Repo 'scripts/lifecycle-evidence.mjs') $lifecycleEvidence $SourceRevision
+if ($LASTEXITCODE -ne 0) { throw 'Windows lifecycle evidence is invalid' }
 [ordered]@{
     probe = 'wp01-windows-host-lifecycle'
     status = 'pass'

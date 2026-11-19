@@ -14,16 +14,25 @@ assert(packageArchive, "PAPERCLIP_PACKAGE_ARCHIVE is required");
 assert(packageManifest, "PAPERCLIP_PACKAGE_MANIFEST is required");
 assert(sourceRevision, "PAPERCLIP_SOURCE_REVISION is required");
 
+const emitPhase = (phase) => console.log(JSON.stringify({
+  check: "isolated-host-lifecycle-phase",
+  phase,
+  sourceRevision,
+}));
+
 const fromPaperclip = (relativePath) => pathToFileURL(resolve(paperclipSource, relativePath)).href;
 const fromPackage = (relativePath) => pathToFileURL(resolve(packageRoot, relativePath)).href;
 
+emitPhase("before-host-imports");
 const dbModule = await import(fromPaperclip("packages/db/src/index.ts"));
 const loaderModule = await import(fromPaperclip("server/src/services/plugin-loader.ts"));
 const lifecycleModule = await import(fromPaperclip("server/src/services/plugin-lifecycle.ts"));
 const registryModule = await import(fromPaperclip("server/src/services/plugin-registry.ts"));
 const databaseModule = await import(fromPaperclip("server/src/services/plugin-database.ts"));
+emitPhase("after-host-imports");
 
 const externalConnectionString = process.env.PAPERCLIP_DATABASE_URL;
+emitPhase("before-database-start");
 if (externalConnectionString) {
   await dbModule.applyPendingMigrations(externalConnectionString);
 }
@@ -38,6 +47,7 @@ const temporary = externalConnectionString
       );
       return embeddedModule.startEmbeddedPostgresTestDatabase("paperclip-m365-wp01-");
     })();
+emitPhase("database-started");
 
 try {
   const db = dbModule.createDb(temporary.connectionString);
