@@ -49,6 +49,13 @@ at most three attempts. An adapter receipt proves queue acceptance, not that a
 human read the alarm. Human acknowledgement requires a delivered receipt and the
 exact versioned runbook step. Unacknowledged incidents and active episodes are
 never evicted by aggregate retention.
+If a route becomes invalid after a claim, an explicit internal proof that no
+issue create/update began returns that attempt through the same nonce-guarded
+database transition. Any started call, partial operator/security delivery or
+ambiguous adapter deadline remains charged. A generic timeout is never presumed
+undispatched, even if the adapter appears to be waiting on a read. Aborted late
+continuations cannot start an issue write. Returned claims retain a bounded delay
+before another attempt; this does not relax the three-attempt dispatch bound.
 
 The settings dashboard uses authenticated human actions with live company
 membership and connection-management permission. It loads on request, performs

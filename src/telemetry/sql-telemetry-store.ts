@@ -149,11 +149,12 @@ export class SqlTelemetryStore implements TelemetryStore {
     return current?.incident.deliveryNonce === nonce ? current.incident : null;
   }
   async finishDelivery(companyId: string, id: string, input: Parameters<TelemetryStore["finishDelivery"]>[2]): Promise<boolean> {
+    if (input.refundAttempt && (input.state !== "pending" || input.receipt !== null || input.nextAttemptAt === null)) throw new TelemetryError("input_invalid");
     const slot = await this.#incidentSlot(companyId, id);
     if (!slot) return false;
-    return await this.#execute(`UPDATE ${this.#companies} SET incidents=jsonb_set(incidents,ARRAY[$2::text],incidents->$2::int || $5::text::jsonb)
-      WHERE company_id=$1 AND incidents->$2::int->>'id'=$3 AND incidents->$2::int->>'deliveryState'='delivering' AND incidents->$2::int->>'deliveryNonce'=$4`,
-    [companyId, slot.index, id, input.deliveryNonce, json({ deliveryState: input.state, receipt: input.receipt, nextAttemptAt: input.nextAttemptAt })]) === 1;
+    return await this.#execute(`UPDATE ${this.#companies} SET incidents=jsonb_set(incidents,ARRAY[$2::text],incidents->$2::int || $5::text::jsonb || jsonb_build_object('attempts', (incidents->$2::int->>'attempts')::int - CASE WHEN $6::boolean THEN 1 ELSE 0 END))
+      WHERE company_id=$1 AND incidents->$2::int->>'id'=$3 AND incidents->$2::int->>'deliveryState'='delivering' AND incidents->$2::int->>'deliveryNonce'=$4 AND (NOT $6::boolean OR (incidents->$2::int->>'attempts')::int>0)`,
+    [companyId, slot.index, id, input.deliveryNonce, json({ deliveryState: input.state, receipt: input.receipt, nextAttemptAt: input.nextAttemptAt }), input.refundAttempt === true]) === 1;
   }
   async acknowledge(companyId: string, id: string, input: Parameters<TelemetryStore["acknowledge"]>[2]): Promise<boolean> {
     const slot = await this.#incidentSlot(companyId, id);

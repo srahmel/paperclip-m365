@@ -8,7 +8,18 @@ import plugin from "../src/worker.js";
 import { TelemetryService } from "../src/telemetry/telemetry-service.js";
 
 describe("M365 plugin scaffold", () => {
-  it.each(["start-sign-in", "reactivate"].flatMap((action) => ["provider", "token", "secret", "database"].map((failure) => ({ action, failure }))))("records asynchronous $action $failure failures without private provider details", async ({ action, failure }) => {
+  it.each([["provider_unavailable", "provider"], ["consent_revoked", "token"], ["cache_invalid", "token"]])("classifies synchronous %s without private provider data", async (code, errorClass) => {
+    const observed = vi.spyOn(TelemetryService.prototype, "observe").mockResolvedValue(undefined);
+    const sessions = new AuthenticationSessionRegistry();
+    try {
+      const harness = createTestHarness({ manifest }); seedConnectionManagers(harness);
+      await createM365Plugin(async () => { throw new ConnectionAccessError(code!); }, sessions).definition.setup(harness.ctx);
+      const companyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      await expect(harness.performAction("connection-status", { connectionId: "11111111-1111-4111-8111-111111111111" }, { companyId, actor: { type: "user", userId: "user-a" } })).rejects.toThrow(code);
+      expect(observed).toHaveBeenCalledExactlyOnceWith(companyId, { kind: "fault", errorClass, component: "token" });
+    } finally { await sessions.shutdown(); observed.mockRestore(); }
+  });
+  it.each(["start-sign-in", "reactivate"].flatMap((action) => ["provider", "unexpected", "token", "secret", "database"].map((failure) => ({ action, failure }))))("records asynchronous $action $failure failures without private provider details", async ({ action, failure }) => {
     const observed = vi.spyOn(TelemetryService.prototype, "observe").mockResolvedValue(undefined);
     const sessions = new AuthenticationSessionRegistry();
     try {
@@ -16,6 +27,7 @@ describe("M365 plugin scaffold", () => {
         provider: { async signIn() { if (failure === "token") throw new MicrosoftAuthError("consent_revoked"); throw new Error("private-provider-canary"); }, async acquireToken() { throw new Error("unused"); } },
         resolveCacheKey: async () => { if (failure === "secret") throw new Error("private-key-canary"); return { value: Buffer.alloc(32, 7).toString("base64"), version: "test" }; },
       });
+      if (failure === "unexpected") vi.spyOn(manager, "signIn").mockRejectedValue(new Error("private-provider-canary"));
       if (failure === "database") vi.spyOn(manager, "signIn").mockRejectedValue(new ConnectionAccessError("storage_unavailable"));
       const harness = createTestHarness({ manifest }); seedConnectionManagers(harness);
       const instance = createM365Plugin(async () => manager, sessions);
@@ -24,7 +36,7 @@ describe("M365 plugin scaffold", () => {
       const params = { connectionId: "11111111-1111-4111-8111-111111111111", expectedTenantId: "22222222-2222-4222-8222-222222222222", displayName: "Synthetic" };
       if (action === "reactivate") await manager.createPendingConnection({ companyId, ...params, shareable: false });
       await expect(harness.performAction(action, params, { companyId, actor: { type: "user", userId: "user-a" } })).resolves.toMatchObject({ status: "pending" });
-      await vi.waitFor(() => expect(observed).toHaveBeenCalledExactlyOnceWith(companyId, { kind: "fault", errorClass: ["secret", "database"].includes(failure) ? failure : "token", component: failure === "database" ? "database" : "token" }));
+      await vi.waitFor(() => expect(observed).toHaveBeenCalledExactlyOnceWith(companyId, { kind: "fault", errorClass: failure === "unexpected" ? "provider" : failure, component: failure === "database" ? "database" : "token" }));
       expect(JSON.stringify([observed.mock.calls, harness.logs])).not.toMatch(/private-(provider|key)-canary/);
     } finally { await sessions.shutdown(); observed.mockRestore(); }
   });

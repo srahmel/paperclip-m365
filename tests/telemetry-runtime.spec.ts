@@ -3,7 +3,7 @@ import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import type { Issue, Project } from "@paperclipai/shared";
 import { registerTelemetry } from "../src/telemetry/runtime.js";
 import { TelemetryService } from "../src/telemetry/telemetry-service.js";
-import { TelemetryError, type AlarmMessage, type TelemetryStore } from "../src/telemetry/types.js";
+import { AlarmDeliveryNotStarted, TelemetryError, type AlarmMessage, type Incident, type TelemetryStore } from "../src/telemetry/types.js";
 import manifest from "../src/manifest.js";
 
 const companyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -168,14 +168,88 @@ describe("telemetry issue alarm adapter", () => {
   it("does not send when routing is missing, revoked, foreign or aborted", async () => {
     const f = await withRoutes();
     f.config.mockResolvedValueOnce({});
-    await expect(f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal)).rejects.toThrow("telemetry_configuration_unavailable");
+    await expect(f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal)).rejects.toBeInstanceOf(AlarmDeliveryNotStarted);
     vi.mocked(f.harness.ctx.projects.get).mockResolvedValueOnce({ id: projectId, companyId: otherCompany } as Project);
-    await expect(f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal)).rejects.toThrow("telemetry_configuration_unavailable");
+    await expect(f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal)).rejects.toBeInstanceOf(AlarmDeliveryNotStarted);
     vi.mocked(f.harness.ctx.access.members.list).mockResolvedValueOnce([]);
-    await expect(f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal)).rejects.toThrow("telemetry_configuration_unavailable");
+    await expect(f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal)).rejects.toBeInstanceOf(AlarmDeliveryNotStarted);
     const abort = new AbortController(); abort.abort();
-    await expect(f.dependencies.alarms!.deliver(companyId, alarm, abort.signal)).rejects.toThrow("telemetry_adapter_timeout");
+    await expect(f.dependencies.alarms!.deliver(companyId, alarm, abort.signal)).rejects.toBeInstanceOf(AlarmDeliveryNotStarted);
     expect(f.create).not.toHaveBeenCalled();
+  });
+
+  it("refunds a claimed attempt after route revocation but charges a partial security delivery", async () => {
+    for (const partial of [false, true]) {
+      const f = await withRoutes();
+      const item = { ...alarm, id: incidentId, episodeKey: alarm.idempotencyKey, deliveryState: "pending", attempts: 0,
+        deliveryNonce: null, receipt: null, nextAttemptAt: null } as unknown as Incident;
+      const finish = vi.fn(async (_scope: string, _id: string, input: Parameters<TelemetryStore["finishDelivery"]>[2]) => {
+        if (input.refundAttempt) item.attempts--;
+        item.deliveryState = input.state; item.receipt = input.receipt; return true;
+      });
+      const store = {
+        listIncidents: async () => [item],
+        claimDelivery: async () => {
+          item.attempts++; item.deliveryNonce = "synthetic-nonce"; item.deliveryState = "delivering";
+          if (!partial) vi.mocked(f.harness.ctx.access.members.list).mockResolvedValue([]);
+          return { ...item };
+        }, finishDelivery: finish,
+      } as unknown as TelemetryStore;
+      if (partial) {
+        const original = f.create.getMockImplementation()!;
+        f.create.mockImplementation(async (input) => {
+          const issue = await original(input);
+          vi.mocked(f.harness.ctx.access.members.list).mockResolvedValue([]); return issue;
+        });
+      }
+      const service = new TelemetryService({ ...f.dependencies, store });
+      await service.flush(companyId);
+      expect(item.attempts).toBe(partial ? 1 : 0);
+      expect(item.deliveryState).toBe("pending"); expect(item.receipt).toBeNull();
+      expect(f.create).toHaveBeenCalledTimes(partial ? 1 : 0);
+      expect(finish.mock.calls[0]![2].refundAttempt).toBe(!partial);
+    }
+  });
+
+  it("charges a lookup timeout and prevents its late continuation from mutating issues", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = await withRoutes();
+      let resolveLookup!: (value: Issue[]) => void;
+      f.list.mockImplementation(() => new Promise<Issue[]>((resolve) => { resolveLookup = resolve; }));
+      const item = { ...alarm, id: incidentId, episodeKey: alarm.idempotencyKey, deliveryState: "pending", attempts: 0,
+        deliveryNonce: null, receipt: null, nextAttemptAt: null } as unknown as Incident;
+      const finish = vi.fn(async (_scope: string, _id: string, input: Parameters<TelemetryStore["finishDelivery"]>[2]) => {
+        if (input.refundAttempt) item.attempts--; item.deliveryState = input.state; return true;
+      });
+      const store = { listIncidents: async () => [item], claimDelivery: async () => {
+        item.attempts++; item.deliveryNonce = "synthetic-nonce"; return { ...item };
+      }, finishDelivery: finish } as unknown as TelemetryStore;
+      const service = new TelemetryService({ ...f.dependencies, store, adapterTimeoutMs: 100 });
+      const pending = service.flush(companyId);
+      await vi.advanceTimersByTimeAsync(100); await pending;
+      expect(item.attempts).toBe(1); expect(finish.mock.calls[0]![2].refundAttempt).toBe(false);
+      resolveLookup([]); await vi.advanceTimersByTimeAsync(0);
+      expect(f.create).not.toHaveBeenCalled(); expect(f.update).not.toHaveBeenCalled();
+      expect(item.attempts).toBe(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("never marks partial or ambiguous issue mutations as not started", async () => {
+    const f = await withRoutes();
+    const original = f.create.getMockImplementation()!;
+    f.create.mockImplementation(async (input) => {
+      const issue = await original(input);
+      vi.mocked(f.harness.ctx.access.members.list).mockResolvedValue([]);
+      return issue;
+    });
+    const partial = await f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal).catch((error: unknown) => error);
+    expect(partial).toBeInstanceOf(TelemetryError); expect(partial).not.toBeInstanceOf(AlarmDeliveryNotStarted);
+    expect(f.create).toHaveBeenCalledTimes(1);
+    const g = await withRoutes();
+    g.create.mockRejectedValueOnce(new Error("ambiguous SDK mutation failure"));
+    const uncertain = await g.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal).catch((error: unknown) => error);
+    expect(uncertain).not.toBeInstanceOf(AlarmDeliveryNotStarted); expect(g.create).toHaveBeenCalledTimes(1);
   });
 
   it("rechecks membership after issue lookup and never dispatches after revocation", async () => {
@@ -185,7 +259,7 @@ describe("telemetry issue alarm adapter", () => {
       vi.mocked(f.harness.ctx.access.members.list).mockResolvedValue([]);
       return [];
     });
-    await expect(f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal)).rejects.toThrow("telemetry_configuration_unavailable");
+    await expect(f.dependencies.alarms!.deliver(companyId, alarm, new AbortController().signal)).rejects.toBeInstanceOf(AlarmDeliveryNotStarted);
     expect(f.create).not.toHaveBeenCalled(); expect(f.update).not.toHaveBeenCalled();
   });
 });

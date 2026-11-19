@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { operationTypes, readOperationTypes } from "../governance/types.js";
 import { bucketRetryAfter, labelKey, requireScope, validateEvent, validateLabels } from "./policy.js";
-import { HISTOGRAM_BOUNDS_MS, MAX_DELIVERY_ATTEMPTS, MAX_INCIDENTS, runbookSteps, TELEMETRY_VERSION, TelemetryError, type Aggregate, type AlarmAdapter, type DailyBaseline, type Incident, type InventorySample, type Labels, type MetricBucket, type MetricBucketDelta, type MetricName, type MetricsAdapter, type RuleCode, type RuleEvaluation, type RuleState, type RunbookStep, type SignalEvent, type TelemetryStore } from "./types.js";
+import { AlarmDeliveryNotStarted, HISTOGRAM_BOUNDS_MS, MAX_DELIVERY_ATTEMPTS, MAX_INCIDENTS, runbookSteps, TELEMETRY_VERSION, TelemetryError, type Aggregate, type AlarmAdapter, type DailyBaseline, type Incident, type InventorySample, type Labels, type MetricBucket, type MetricBucketDelta, type MetricName, type MetricsAdapter, type RuleCode, type RuleEvaluation, type RuleState, type RunbookStep, type SignalEvent, type TelemetryStore } from "./types.js";
 
 const MINUTE = 60_000;
 const DAY = 86_400_000;
@@ -186,6 +186,7 @@ export class TelemetryService {
       claims++;
       if (!claimed.deliveryNonce || claimed.attempts < 1 || claimed.attempts > MAX_DELIVERY_ATTEMPTS) throw new TelemetryError("telemetry_data_invalid");
       let receipt: string | null = null;
+      let refundAttempt = false;
       try {
         const result = await this.#bounded((signal) => this.#alarms!.deliver(companyId, {
           idempotencyKey: claimed.episodeKey, statistic: claimed.statistic, code: claimed.code, severity: claimed.severity, labels: claimed.labels,
@@ -194,10 +195,10 @@ export class TelemetryService {
         }, signal), Math.min(this.#adapterTimeoutMs, Math.max(1, deadline - Date.now())));
         if (typeof result.receipt !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(result.receipt)) throw new Error("invalid receipt");
         receipt = result.receipt;
-      } catch { /* Fixed delivery status only, never persist or log adapter exceptions. */ }
-      const state = receipt !== null ? "delivered" : claimed.attempts >= MAX_DELIVERY_ATTEMPTS ? "exhausted" : "pending";
-      const nextAttemptAt = state === "pending" ? new Date(this.#now().getTime() + 30_000 * 2 ** (claimed.attempts - 1)).toISOString() : null;
-      if (!await this.#db(() => this.#store.finishDelivery(companyId, claimed.id, { deliveryNonce: claimed.deliveryNonce!, state, receipt, nextAttemptAt }))) throw new TelemetryError("telemetry_delivery_conflict");
+      } catch (error) { refundAttempt = error instanceof AlarmDeliveryNotStarted; }
+      const state = receipt !== null ? "delivered" : !refundAttempt && claimed.attempts >= MAX_DELIVERY_ATTEMPTS ? "exhausted" : "pending";
+      const nextAttemptAt = state === "pending" ? new Date(this.#now().getTime() + 30_000 * (refundAttempt ? 1 : 2 ** (claimed.attempts - 1))).toISOString() : null;
+      if (!await this.#db(() => this.#store.finishDelivery(companyId, claimed.id, { deliveryNonce: claimed.deliveryNonce!, state, receipt, nextAttemptAt, refundAttempt }))) throw new TelemetryError("telemetry_delivery_conflict");
     }
   }
 

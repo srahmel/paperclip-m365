@@ -187,6 +187,18 @@ test("crashed delivery leases are bounded and old owners cannot overwrite a recl
   const three = (await store.claimDelivery(company, item.id, "2026-11-19T12:02:02.000Z"))!; assert.equal(three.attempts, 3);
   assert.equal(await store.claimDelivery(company, item.id, "2026-11-19T12:03:03.000Z"), null);
   assert.equal((await store.listIncidents(company, 1))[0]?.deliveryState, "exhausted");
+  const refundable = incident(); await store.ensureIncident(company, refundable);
+  const oldClaim = (await store.claimDelivery(company, refundable.id, now))!;
+  const currentClaim = (await store.claimDelivery(company, refundable.id, "2026-11-19T12:01:01.000Z"))!;
+  const refund = { state: "pending" as const, receipt: null, nextAttemptAt: "2026-11-19T12:01:31.000Z", refundAttempt: true };
+  assert.equal(await store.finishDelivery(company, refundable.id, { ...refund, deliveryNonce: oldClaim.deliveryNonce! }), false);
+  assert.equal((await store.listIncidents(company, 256)).find((entry) => entry.id === refundable.id)?.attempts, 2);
+  assert.equal(await store.finishDelivery(company, refundable.id, { ...refund, deliveryNonce: currentClaim.deliveryNonce! }), true);
+  assert.equal(await store.finishDelivery(company, refundable.id, { ...refund, deliveryNonce: currentClaim.deliveryNonce! }), false);
+  const saved = (await store.listIncidents(company, 256)).find((entry) => entry.id === refundable.id)!;
+  assert.equal(saved.attempts, 1); assert.equal(saved.deliveryState, "pending"); assert.equal(saved.receipt, null);
+  await assert.rejects(store.finishDelivery(company, refundable.id, { ...refund, state: "delivered", deliveryNonce: currentClaim.deliveryNonce! }), /input_invalid/);
+
 });
 
 test("pruning removes expired aggregate data but retains unacknowledged and ongoing episodes", async () => {

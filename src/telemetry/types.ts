@@ -66,7 +66,7 @@ export interface TelemetryStore {
   listIncidents(companyId: string, limit: number): Promise<Incident[]>;
   /** Atomic pending/due claim, attempts<3; increments attempts and sets delivering; stale leases may be reclaimed. */
   claimDelivery(companyId: string, id: string, nowIso: string): Promise<Incident | null>;
-  finishDelivery(companyId: string, id: string, input: { deliveryNonce: string; state: "delivered" | "pending" | "exhausted"; receipt: string | null; nextAttemptAt: string | null }): Promise<boolean>;
+  finishDelivery(companyId: string, id: string, input: { deliveryNonce: string; state: "delivered" | "pending" | "exhausted"; receipt: string | null; nextAttemptAt: string | null; refundAttempt?: boolean }): Promise<boolean>;
   acknowledge(companyId: string, id: string, input: { actorId: string; at: string; runbookStep: RunbookStep }): Promise<boolean>;
   prune(companyId: string, beforeMinuteIso: string, beforeDayIso: string): Promise<void>;
 }
@@ -83,4 +83,9 @@ export interface AlarmAdapter {
 }
 export class TelemetryError extends Error {
   constructor(readonly code: string) { super(code); this.name = "TelemetryError"; }
+}
+
+/** Internal evidence that no issue mutation was attempted by the adapter. */
+export class AlarmDeliveryNotStarted extends Error {
+  constructor() { super("telemetry_delivery_not_started"); this.name = "AlarmDeliveryNotStarted"; }
 }

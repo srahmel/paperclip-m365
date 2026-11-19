@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { evaluateRules, TelemetryService } from "../src/telemetry/telemetry-service.js";
 import { labelKey, metricLabels, validateEvent, validateLabels } from "../src/telemetry/policy.js";
-import { components, errorClasses, HISTOGRAM_BOUNDS_MS, MAX_INCIDENTS, outcomes, statusClasses, type DailyBaseline, type Incident, type InventorySample, type Labels, type MetricBucket, type MetricName, type RuleCode, type RuleState, type SignalEvent, type TelemetryStore } from "../src/telemetry/types.js";
+import { AlarmDeliveryNotStarted, components, errorClasses, HISTOGRAM_BOUNDS_MS, MAX_INCIDENTS, outcomes, statusClasses, type DailyBaseline, type Incident, type InventorySample, type Labels, type MetricBucket, type MetricName, type RuleCode, type RuleState, type SignalEvent, type TelemetryStore } from "../src/telemetry/types.js";
 import { operationTypes } from "../src/governance/types.js";
 const NOW = new Date("2026-11-19T12:00:00Z");
 const inventory: InventorySample = { at: NOW.toISOString(), unknownCount: 0, oldestUnknownAgeSeconds: 0, operations: 100, auditEvents: 200, logicalBytes: 100, validatedCapacityBytes: 1000 };
@@ -35,7 +35,7 @@ function fakeStore() {
     async ensureIncident(_company, incident) { if (incidents.some((item) => item.episodeKey === incident.episodeKey)) return "exists"; if (incidents.length >= MAX_INCIDENTS) return "capacity"; incidents.push(structuredClone(incident)); return "created"; },
     async listIncidents(_company, limit) { return structuredClone(incidents.slice(0, limit)); },
     async claimDelivery(_company, id, now) { const row = incidents.find((item) => item.id === id); if (!row || row.deliveryState !== "pending" || row.attempts >= 3 || row.nextAttemptAt! > now) return null; row.attempts++; row.deliveryState = "delivering"; row.deliveryNonce = `nonce-${++nonce}`; row.deliveryClaimedAt = now; return structuredClone(row); },
-    async finishDelivery(_company, id, input) { const row = incidents.find((item) => item.id === id); if (!row || row.deliveryState !== "delivering" || row.deliveryNonce !== input.deliveryNonce) return false; row.deliveryState = input.state; row.receipt = input.receipt; row.nextAttemptAt = input.nextAttemptAt; return true; },
+    async finishDelivery(_company, id, input) { const row = incidents.find((item) => item.id === id); if (!row || row.deliveryState !== "delivering" || row.deliveryNonce !== input.deliveryNonce) return false; if (input.refundAttempt) row.attempts--; row.deliveryState = input.state; row.receipt = input.receipt; row.nextAttemptAt = input.nextAttemptAt; return true; },
     async acknowledge(_company, id, input) { const row = incidents.find((item) => item.id === id); if (!row || row.deliveryState !== "delivered" || !row.receipt || row.runbookStep !== input.runbookStep || row.acknowledgedAt) return false; row.acknowledgedAt = input.at; row.acknowledgedBy = input.actorId; row.acknowledgedStep = input.runbookStep; return true; },
     async prune() {},
   };
@@ -378,4 +378,17 @@ describe("company-scoped metric mirror evidence", () => {
     expect((await f.service.dashboard("scope-1")).metrics).toBe("accepted");
     expect((await f.service.dashboard("scope-1024")).metrics).toBe("accepted");
   });
+});
+
+
+it("refunds only positively known pre-dispatch failures with a bounded retry delay", async () => {
+  const f = fixture();
+  f.alarms.deliver.mockRejectedValueOnce(new AlarmDeliveryNotStarted());
+  await f.service.observe("company-a", { kind: "fault", errorClass: "database", component: "database" });
+  expect(f.incidents[0]).toMatchObject({ attempts: 0, deliveryState: "pending", receipt: null,
+    nextAttemptAt: new Date(NOW.getTime() + 30_000).toISOString() });
+  f.setNow(new Date(NOW.getTime() + 30_000));
+  f.alarms.deliver.mockRejectedValueOnce(new Error("dispatch outcome ambiguous"));
+  await f.service.flush("company-a");
+  expect(f.incidents[0]).toMatchObject({ attempts: 1, deliveryState: "pending", receipt: null });
 });

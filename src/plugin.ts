@@ -54,7 +54,7 @@ export function createM365Plugin(
           // failures never reach the action wrapper. Cancellation is not a fault.
           if (!args[2]?.aborted) {
             const code = error instanceof ConnectionAccessError ? error.code : "provider_unavailable";
-            await observe(args[0].companyId, { kind: "fault", errorClass: code === "storage_unavailable" ? "database" : code === "key_unavailable" ? "secret" : "token", component: code === "storage_unavailable" ? "database" : "token" });
+            await observe(args[0].companyId, { kind: "fault", errorClass: code === "storage_unavailable" ? "database" : code === "key_unavailable" ? "secret" : code === "provider_unavailable" ? "provider" : "token", component: code === "storage_unavailable" ? "database" : "token" });
           }
           throw error;
         }
@@ -70,8 +70,8 @@ export function createM365Plugin(
             if (context.companyId && !name.startsWith("telemetry-")) {
               if (["authenticated_human_required", "connection_management_forbidden", "authorization_unavailable"].includes(code)) {
                 await observe(context.companyId, { kind: "denial", errorClass: "authorization", component: "action" });
-              } else if (["key_unavailable", "cache_invalid", "provider_unavailable", "storage_unavailable"].includes(code)) {
-                await observe(context.companyId, { kind: "fault", errorClass: code === "storage_unavailable" ? "database" : code === "key_unavailable" ? "secret" : "token", component: code === "storage_unavailable" ? "database" : "token" });
+              } else if (["key_unavailable", "cache_invalid", "consent_revoked", "provider_unavailable", "storage_unavailable"].includes(code)) {
+                await observe(context.companyId, { kind: "fault", errorClass: code === "storage_unavailable" ? "database" : code === "key_unavailable" ? "secret" : code === "provider_unavailable" ? "provider" : "token", component: code === "storage_unavailable" ? "database" : "token" });
               }
             }
             throw new ConnectionAccessError(code);

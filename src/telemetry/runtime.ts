@@ -1,7 +1,7 @@
 import type { PluginContext, PluginPerformActionContext } from "@paperclipai/plugin-sdk";
 import { TelemetryService } from "./telemetry-service.js";
 import { SqlTelemetryStore } from "./sql-telemetry-store.js";
-import { runbookSteps, TelemetryError, type AlarmAdapter, type AlarmMessage, type RunbookStep, type SignalEvent, type TelemetryStore } from "./types.js";
+import { AlarmDeliveryNotStarted, runbookSteps, TelemetryError, type AlarmAdapter, type AlarmMessage, type RunbookStep, type SignalEvent, type TelemetryStore } from "./types.js";
 
 interface Route { projectId: string; userId: string }
 interface TelemetryConfiguration { validatedCapacityBytes: number | null; operatorRoute: Route | null; securityRoute: Route | null }
@@ -42,11 +42,18 @@ export function registerTelemetry(input: {
       return verified.every(Boolean);
     },
     async deliver(companyId, message, signal) {
-      const config = await configuration(companyId);
-      if (!config.operatorRoute || (message.security && !config.securityRoute)) throw new TelemetryError("telemetry_configuration_unavailable");
-      const operator = await deliverIssue(ctx, companyId, config.operatorRoute, message, "operations", signal);
-      if (message.security) await deliverIssue(ctx, companyId, config.securityRoute!, message, "security", signal);
-      return { receipt: `issue:${operator}` };
+      let attempted = false;
+      const beforeMutation = () => { attempted = true; };
+      try {
+        const config = await configuration(companyId);
+        if (!config.operatorRoute || (message.security && !config.securityRoute)) throw new TelemetryError("telemetry_configuration_unavailable");
+        const operator = await deliverIssue(ctx, companyId, config.operatorRoute, message, "operations", signal, beforeMutation);
+        if (message.security) await deliverIssue(ctx, companyId, config.securityRoute!, message, "security", signal, beforeMutation);
+        return { receipt: `issue:${operator}` };
+      } catch (error) {
+        if (!attempted) throw new AlarmDeliveryNotStarted();
+        throw error;
+      }
     },
   };
   const dependencies = { store: input.store ?? new SqlTelemetryStore(ctx.db), metrics: { write: (name: string, value: number, labels: Record<string, string>) => ctx.metrics.write(name, value, labels) }, alarms, now };
@@ -130,7 +137,7 @@ export function registerTelemetry(input: {
   };
 }
 
-async function deliverIssue(ctx: PluginContext, companyId: string, target: Route, message: AlarmMessage, channel: "operations" | "security", signal: AbortSignal): Promise<string> {
+async function deliverIssue(ctx: PluginContext, companyId: string, target: Route, message: AlarmMessage, channel: "operations" | "security", signal: AbortSignal, beforeMutation: () => void): Promise<string> {
   const check = () => { if (signal.aborted) throw new TelemetryError("telemetry_adapter_timeout"); };
   check();
   if (!await verifyRoute(ctx, companyId, target)) throw new TelemetryError("telemetry_configuration_unavailable");
@@ -151,6 +158,7 @@ async function deliverIssue(ctx: PluginContext, companyId: string, target: Route
   // Membership or project ownership may have changed while resolving the prior issue.
   if (!await verifyRoute(ctx, companyId, target)) throw new TelemetryError("telemetry_configuration_unavailable");
   check();
+  beforeMutation();
   const issue = prior[0]
     ? await ctx.issues.update(prior[0].id, patch, companyId)
     : await ctx.issues.create({ companyId, projectId: target.projectId, ...patch, status: "todo", originKind, originId });
