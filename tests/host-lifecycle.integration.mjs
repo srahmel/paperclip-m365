@@ -14,7 +14,7 @@ assert(packageArchive, "PAPERCLIP_PACKAGE_ARCHIVE is required");
 assert(packageManifest, "PAPERCLIP_PACKAGE_MANIFEST is required");
 assert(sourceRevision, "PAPERCLIP_SOURCE_REVISION is required");
 
-const emitPhase = (phase) => console.log(JSON.stringify({
+const emitPhase = (phase) => console.error(JSON.stringify({
   check: "isolated-host-lifecycle-phase",
   phase,
   sourceRevision,
@@ -23,16 +23,16 @@ const emitPhase = (phase) => console.log(JSON.stringify({
 const fromPaperclip = (relativePath) => pathToFileURL(resolve(paperclipSource, relativePath)).href;
 const fromPackage = (relativePath) => pathToFileURL(resolve(packageRoot, relativePath)).href;
 
-emitPhase("before-host-imports");
+emitPhase("loader-start");
 const dbModule = await import(fromPaperclip("packages/db/src/index.ts"));
 const loaderModule = await import(fromPaperclip("server/src/services/plugin-loader.ts"));
 const lifecycleModule = await import(fromPaperclip("server/src/services/plugin-lifecycle.ts"));
 const registryModule = await import(fromPaperclip("server/src/services/plugin-registry.ts"));
 const databaseModule = await import(fromPaperclip("server/src/services/plugin-database.ts"));
-emitPhase("after-host-imports");
+emitPhase("host-initialized");
 
 const externalConnectionString = process.env.PAPERCLIP_DATABASE_URL;
-emitPhase("before-database-start");
+emitPhase("database-lifecycle-start");
 if (externalConnectionString) {
   await dbModule.applyPendingMigrations(externalConnectionString);
 }
@@ -143,6 +143,7 @@ try {
 
   const { migrationRows, namespaceRows } = await assertPersistence(restoredInstalled.id, "ready");
 
+  emitPhase("lifecycle-complete");
   console.log(JSON.stringify({
     check: "isolated-host-lifecycle",
     packageVersion: restoredInstalled.version,

@@ -104,6 +104,13 @@ Write-Output "::notice title=Windows lifecycle phase::$phase - starting node wit
     (Join-Path $Repo 'tests/host-lifecycle.integration.mjs') `
     1> $lifecycleStdout 2> $lifecycleStderr
 $lifecycleExitCode = $LASTEXITCODE
+$exitMarker = [ordered]@{
+    check = 'isolated-host-lifecycle-phase'
+    phase = 'process-exit'
+    sourceRevision = $SourceRevision
+    exitCode = $lifecycleExitCode
+} | ConvertTo-Json -Compress
+Add-Content -LiteralPath $lifecycleStderr -Value $exitMarker -Encoding utf8
 Copy-Item -LiteralPath $lifecycleStdout -Destination $lifecycleEvidence
 Get-Content -LiteralPath $lifecycleStdout | Write-Output
 Get-Content -LiteralPath $lifecycleStderr | Write-Output
@@ -112,7 +119,10 @@ if ($lifecycleExitCode -ne 0) { throw "Windows host lifecycle failed with exit c
 
 $lifecycle = Get-Content -Raw -LiteralPath $lifecycleEvidence
 if ([string]::IsNullOrWhiteSpace($lifecycle)) { throw 'Windows lifecycle evidence is empty' }
-& node (Join-Path $Repo 'scripts/lifecycle-evidence.mjs') $lifecycleEvidence $SourceRevision
+$lifecyclePhases = Get-Content -Raw -LiteralPath $lifecycleStderr
+if ([string]::IsNullOrWhiteSpace($lifecyclePhases)) { throw 'Windows lifecycle phase evidence is empty' }
+& node (Join-Path $Repo 'scripts/lifecycle-evidence.mjs') `
+    $lifecycleEvidence $lifecycleStderr $SourceRevision
 if ($LASTEXITCODE -ne 0) { throw 'Windows lifecycle evidence is invalid' }
 [ordered]@{
     probe = 'wp01-windows-host-lifecycle'

@@ -117,6 +117,17 @@ absichtlich falscher Digest wird für beide Phasen automatisiert abgewiesen. Die
 Windows- und Linux-Logs geben Zustandsfolge, Hashprüfpunkte, stabile ID,
 Migration, Namespace und Health maschinenlesbar aus.
 
+Auf Windows ist die Evidence absichtlich getrennt: `plugin-lifecycle.stdout.jsonl`
+und die identische kanonische `plugin-lifecycle.jsonl` enthalten ausschließlich
+den vollständigen Lifecycle-Enddatensatz. `plugin-lifecycle.stderr.log` enthält
+die geordneten JSONL-Phasen `loader-start`, `host-initialized`,
+`database-lifecycle-start`, `database-started`, `lifecycle-complete` und den vom
+PowerShell-Runner ergänzten nativen `process-exit`-Marker. Auf einem erfolgreichen
+Lauf ist stderr deshalb nicht leer; nicht-JSON-Ausgabe, fehlende oder leere
+Dateien, falsche Reihenfolge, unvollständige Zustandsfolge und ein Exitcode ungleich
+`0` schlagen fail-closed fehl. Der Workflow veröffentlicht für jede Evidence-Datei
+zusätzlich Bytezahl und SHA-256 in der Job-Zusammenfassung.
+
 Grenze: Der Drill prüft Loader, Migrations- und Lifecycle-Persistenz sowie den
 gebauten Worker über die öffentliche SDK-Harness-Schnittstelle. Er ist keine
 Browserprüfung und kein Test mit einem echten Microsoft-Konto; beides gehört

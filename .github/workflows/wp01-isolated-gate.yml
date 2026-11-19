@@ -185,6 +185,7 @@ jobs:
           if (Test-Path -LiteralPath $evidence) {
             Get-ChildItem -LiteralPath $evidence -File | ForEach-Object {
               "## $($_.Name)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              "size=$($_.Length) sha256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
               '```text' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
               Get-Content -LiteralPath $_.FullName | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
               '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
