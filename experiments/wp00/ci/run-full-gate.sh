@@ -63,7 +63,7 @@ runner=$(node -p "require('$repo/experiments/wp00/expected-host-fingerprint.json
 node "$source/$runner" --test --test-reporter=tap --test-timeout=120000 "$repo/experiments/wp00/operation-contract.test.ts" | tee "$scratch/postgresql.tap"
 assert_tap_counts 20 "$scratch/postgresql.tap"
 node "$source/$runner" --test --test-reporter=tap --test-timeout=120000 "$repo/tests/sql-connection-store.postgres.integration.ts" | tee "$scratch/wp02-postgresql.tap"
-assert_tap_counts 4 "$scratch/wp02-postgresql.tap"
+assert_tap_counts 6 "$scratch/wp02-postgresql.tap"
 node "$source/node_modules/typescript/bin/tsc" --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext \
   --types node --typeRoots "$source/packages/plugins/sdk/node_modules/@types" --skipLibCheck \
   "$repo/experiments/wp00/operation-contract.ts" "$repo/experiments/wp00/operation-contract.test.ts"
@@ -90,4 +90,4 @@ dropdb -h 127.0.0.1 -U postgres paperclip_m365_wp01
 
 pg_ctl -D "$pgdata" -m fast -w stop >/dev/null
 trap - EXIT HUP INT TERM
-printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","wp02PostgresAssertions":"4/4","sdkAssertions":"28/28","pluginLifecycle":"install-ready-disable-reenable-ready-disable-soft-uninstall-restore-ready","packageDigestVerifiedAt":["install","restore"],"gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'
+printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","wp02PostgresAssertions":"6/6","sdkAssertions":"28/28","pluginLifecycle":"install-ready-disable-reenable-ready-disable-soft-uninstall-restore-ready","packageDigestVerifiedAt":["install","restore"],"gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'
