@@ -47,3 +47,33 @@ This checks the actual React components with simulated actions, not the host's
 embedded SDK UI transport or a production installation. Unit tests additionally
 cover stale epochs, expiry, mismatched hashes/identities and binary limits. It is
 not a complete screen-reader or accessibility conformance audit.
+
+## Persisted app setup
+
+The settings page loads and saves company-scoped configuration through the
+host's existing authenticated `GET/POST /api/plugins/srahmel.m365/config`
+contract. Saving requires host instance-administrator authorization. Tenant and
+client IDs can be saved without a cache key. The optional read-only pilot
+selection explicitly replaces scopes with `User.Read`, `Mail.Read`,
+`Calendars.Read`, and `Files.Read`; otherwise existing scopes are preserved.
+The cache field accepts only an existing secret reference ID, never a key value.
+Saving does not start Microsoft sign-in or grant consent.
+
+Before saving, the UI reads the latest configuration and merges edited settings,
+preserving unknown fields and unedited secret references. The host endpoint has
+no compare-and-swap contract, so simultaneous administrator writes between that
+read and save cannot be made atomic by this UI. Avoid concurrent configuration
+editing. Successful responses must confirm the saved configuration; HTTP errors,
+malformed payloads, and cross-company responses are rejected.
+
+Automated coverage verifies preservation, prerequisite gating, explicit pilot
+selection, failed saves, and successful JSONB responses that reorder nested
+object keys. Confirmation compares JSON values structurally, preserving array
+order. Error messages classify known host errors without displaying arbitrary
+server text, submitted values, or secrets.
+
+The coordinating task reported live authenticated acceptance of tenant/client
+IDs and pilot scopes, including persistence after reload. It also confirmed
+that the cache reference persisted despite a false failure message caused by
+the former order-sensitive comparison. Browser acceptance of the comparison
+fix remains pending; no Microsoft sign-in or consent is part of these checks.
