@@ -9,6 +9,7 @@ import { ActionEpoch, AuthenticationPoller, type AuthenticationSession } from ".
 import { GovernancePanel } from "./governance-panel.js";
 import { TelemetryPanel } from "./telemetry-panel.js";
 import { settingsStyles } from "./settings-styles.js";
+import { AppSetup } from "./app-setup.js";
 
 type ScaffoldStatus = {
   status: "ready";
@@ -55,6 +56,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
   const reactivate = usePluginAction("reactivate");
   const loadAuthenticationSession = usePluginAction("authentication-session-status");
   const [connectionId, setConnectionId] = useState("");
+  const [appReady, setAppReady] = useState(false);
   const [expectedTenantId, setExpectedTenantId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [shareable, setShareable] = useState(false);
@@ -76,6 +78,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
     setChallenge(null);
     setConnection(null);
     setConnectionId("");
+    setAppReady(false);
   }, [context.companyId, actionEpoch, authenticationPoller]);
 
   async function run(action: () => Promise<unknown>) {
@@ -95,6 +98,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
   }
 
   async function begin(action: () => Promise<unknown>) {
+    if (!appReady) return;
     const generation = actionEpoch.start();
     authenticationPoller.stop();
     setActionError(false);
@@ -155,6 +159,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
       </header>
       {loading ? <p>…</p> : null}
       {error || actionError || !context.companyId ? <p role="alert">{t.unavailable}</p> : null}
+      {context.companyId ? <AppSetup key={context.companyId} companyId={context.companyId} locale={locale} onLoaded={setExpectedTenantId} onReady={setAppReady} /> : null}
       <section className="m365-section" aria-label={t.accountHeading}>
       <h3>{t.accountHeading}</h3>
       <div className="m365-fields">
@@ -166,7 +171,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         {t.shareable}
       </label>
       <div className="m365-actions">
-        <button className="m365-primary" type="button" onClick={() => begin(() => startSignIn(buildStartSignInParams({
+        <button className="m365-primary" disabled={!appReady} type="button" onClick={() => begin(() => startSignIn(buildStartSignInParams({
           connectionId,
           expectedTenantId,
           displayName,
@@ -178,7 +183,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         <label>{t.connectionId}<input name="m365-connection-id" autoComplete="off" spellCheck={false} aria-describedby="m365-connection-help" value={connectionId} onChange={(event) => setConnectionId(event.target.value)} /><span id="m365-connection-help" className="m365-hint">{t.connectionHelp}</span></label>
         <div className="m365-actions">
           <button type="button" onClick={() => run(() => loadStatus({ connectionId }))}>{t.status}</button>
-          <button type="button" onClick={() => begin(() => reactivate({ connectionId }))}>{t.reactivate}</button>
+          <button type="button" disabled={!appReady} onClick={() => begin(() => reactivate({ connectionId }))}>{t.reactivate}</button>
         </div>
         <details><summary>{t.disconnect}</summary><p className="m365-hint">{t.disconnectHelp}</p><button type="button" onClick={() => { void disconnectConnection(); }}>{t.disconnect}</button></details>
       </details>
