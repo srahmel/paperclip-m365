@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { appFields, configReady, loadAppConfig, readOnlyPilotScopes, saveAppConfig } from "../src/ui/app-config.js";
+import { appConfigErrorMessage, appFields, configReady, loadAppConfig, readOnlyPilotScopes, sameConfigValue, saveAppConfig } from "../src/ui/app-config.js";
 
 const companyId = "test-company";
 const fields = { microsoftTenantId: "11111111-1111-4111-8111-111111111111", microsoftClientId: "22222222-2222-4222-8222-222222222222", secretId: "existing-secret" };
@@ -7,6 +7,33 @@ const config = { ...fields, cacheEncryptionKey: { type: "secret_ref", secretId: 
 function response(configJson: unknown, status = 200) { return new Response(JSON.stringify({ companyId, configJson }), { status }); }
 
 describe("host app configuration", () => {
+  it("confirms JSONB responses with reordered nested object keys", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response(config)).mockResolvedValueOnce(response({
+      ...config, cacheEncryptionKey: { version: 2, secretId: fields.secretId, type: "secret_ref" },
+    }));
+    await expect(saveAppConfig(companyId, fields, fetcher)).resolves.toEqual(config);
+    expect(sameConfigValue({ a: [{ b: 1, c: 2 }] }, { a: [{ c: 2, b: 1 }] })).toBe(true);
+    expect(sameConfigValue(["User.Read", "Mail.Read"], ["Mail.Read", "User.Read"])).toBe(false);
+    expect(sameConfigValue({ a: 1 }, { a: 2 })).toBe(false);
+    expect(sameConfigValue({ a: null }, {})).toBe(false);
+  });
+
+  it.each([
+    [401, "arbitrary sensitive server content", "session"],
+    [403, "arbitrary sensitive server content", "administrator"],
+    [400, "Invalid secret_ref binding at cacheEncryptionKey", "secret reference"],
+    [400, "Configuration does not match the plugin's instanceConfigSchema", "format"],
+    [500, "arbitrary sensitive server content", "request failed"],
+  ])("shows sanitized diagnostics for HTTP %s", async (status, error, expected) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ error }), { status: Number(status) }));
+    try { await loadAppConfig(companyId, fetcher); throw new Error("Expected rejection"); }
+    catch (failure) {
+      const message = appConfigErrorMessage(failure, false);
+      expect(message).toContain(expected);
+      expect(message).toContain(`HTTP ${status}`);
+      expect(message).not.toContain("arbitrary sensitive server content");
+    }
+  });
   it("loads only the company-scoped host endpoint with session credentials", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(config));
     expect(await loadAppConfig(companyId, fetcher)).toEqual(config);

@@ -67,6 +67,13 @@ editing. Successful responses must confirm the saved configuration; HTTP errors,
 malformed payloads, and cross-company responses are rejected.
 
 Automated coverage verifies preservation, prerequisite gating, explicit pilot
-selection, and failed saves. Live authenticated browser validation of this app
-setup extension remains pending; earlier visual observations above describe the
-previous UI and preview checks.
+selection, failed saves, and successful JSONB responses that reorder nested
+object keys. Confirmation compares JSON values structurally, preserving array
+order. Error messages classify known host errors without displaying arbitrary
+server text, submitted values, or secrets.
+
+The coordinating task reported live authenticated acceptance of tenant/client
+IDs and pilot scopes, including persistence after reload. It also confirmed
+that the cache reference persisted despite a false failure message caused by
+the former order-sensitive comparison. Browser acceptance of the comparison
+fix remains pending; no Microsoft sign-in or consent is part of these checks.

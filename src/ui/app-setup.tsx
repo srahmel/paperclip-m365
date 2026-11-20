@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { appFields, configReady, loadAppConfig, saveAppConfig, type AppConfig, type AppFields } from "./app-config.js";
+import { appConfigErrorMessage, appFields, configReady, loadAppConfig, saveAppConfig, type AppConfig, type AppFields } from "./app-config.js";
 
 export function AppSetup({ companyId, onLoaded, onReady, locale }: {
   companyId: string; onLoaded: (tenant: string) => void; onReady: (ready: boolean) => void; locale: string;
@@ -28,9 +28,9 @@ export function AppSetup({ companyId, onLoaded, onReady, locale }: {
       setConfig(next); setFields(appFields(next)); onLoaded(appFields(next).microsoftTenantId); onReady(configReady(next));
       setSecretEdited(false); setUsePilot(false);
       setStatus(save ? (de ? "App-Konfiguration gespeichert. Keine Anmeldung gestartet." : "App configuration saved. Sign-in has not been started.") : (de ? "App-Konfiguration geladen." : "App configuration loaded."));
-    } catch {
+    } catch (failure) {
       if (!active.current) return;
-      setError(true); setStatus(de ? "Konfiguration konnte nicht geladen oder gespeichert werden. Prüfe deine Anmeldung und Administratorrechte und lade erneut." : "Could not load or save configuration. Check your session and administrator permissions, then reload.");
+      setError(true); setStatus(appConfigErrorMessage(failure, de));
     } finally { lock.current = false; if (active.current) setBusy(false); }
   }
   useEffect(() => { void run(false); }, []);
