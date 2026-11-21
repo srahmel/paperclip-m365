@@ -20,8 +20,9 @@ export interface HttpRequest {
 export interface HttpResponse { status: number; headers: Record<string, string | undefined>; body: Uint8Array }
 export interface HttpTransport { send(request: HttpRequest): Promise<HttpResponse> }
 export type GraphErrorCode = "request_invalid" | "endpoint_denied" | "authority_unavailable" | "aborted" | "timeout" | "network" | "response_invalid" | "size_limit" | "redirect_denied" | "continuation_invalid" | "capacity_exceeded" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "precondition_failed" | "throttled" | "server_error" | "http_error";
+export type ContinuationDiagnostic = "next_link_format" | "next_link_origin" | "next_link_path" | "next_link_added_parameter" | "next_link_changed_parameter" | "next_link_duplicate_parameter" | "next_link_missing_parameter";
 export class GraphError extends Error {
-  constructor(readonly code: GraphErrorCode, readonly status?: number, readonly mutationOutcome: "failed" | "unknown" = "failed") {
+  constructor(readonly code: GraphErrorCode, readonly status?: number, readonly mutationOutcome: "failed" | "unknown" = "failed", readonly diagnostic?: ContinuationDiagnostic) {
     super(code); this.name = "GraphError";
   }
 }

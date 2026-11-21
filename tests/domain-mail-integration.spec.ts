@@ -61,6 +61,14 @@ function fixture() {
 }
 
 describe("real mail domain / host runtime / GraphClient seam", () => {
+  it("reports fixed continuation diagnostics without returning provider URLs or message fields", async () => {
+    const f = fixture();
+    f.policy.bindings[0]!.rules.push({ operationType: "mail-list-messages", resources: ["mail-folder:inbox"] });
+    f.send.mockResolvedValue({ status: 200, headers: {}, body: Buffer.from(JSON.stringify({ value: [{ subject: "private-canary" }], "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders/foreign/messages?$skip=1" })) });
+    const result = await f.harness.executeTool("mail-list-messages", { connectionId, folderId: "inbox", pageSize: 1 }, identity);
+    expect(result).toEqual({ error: "continuation_invalid", diagnostic: "next_link_path" });
+    expect(f.send).toHaveBeenCalledOnce();
+  });
   it("draft preparation only reads Drafts through a fixed immutable-ID header and requires explicit read grant", async () => {
     const f = fixture();
     const prepared = await f.harness.executeTool("mail-prepare-create-draft", { connectionId, draftsFolderId: "drafts", message }, identity);

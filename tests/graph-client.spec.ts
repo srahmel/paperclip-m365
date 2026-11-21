@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GraphClient, retryAfterSeconds } from "../src/graph/client.js";
 import { GraphError, HttpFailure, FILE_LIMIT, JSON_LIMIT, type GraphRequest, type HttpResponse } from "../src/graph/types.js";
 import { operationTypes } from "../src/governance/types.js";
-import { validateRequest } from "../src/graph/endpoints.js";
+import { validateNextLink, validateRequest } from "../src/graph/endpoints.js";
 
 const binding = { companyId: "company", agentId: "agent", projectId: "project", connectionId: "connection", generation: 1, tenantId: "tenant", homeAccountId: "account" };
 const read: GraphRequest = { binding, operationType: "mail-list-messages", method: "GET", path: "/me/mailFolders/inbox/messages" };
@@ -175,6 +175,21 @@ describe("Graph retries, failures and authority", () => {
 
 describe("opaque pagination and download boundaries", () => {
   const next = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skiptoken=opaque";
+  it.each([
+    ["not-a-url", "next_link_format"],
+    ["https://evil.test/private-canary", "next_link_origin"],
+    [next.replace("inbox", "foreign"), "next_link_path"],
+    [`${next}&$expand=private-canary`, "next_link_added_parameter"],
+    [`${next}&$select=private-canary`, "next_link_changed_parameter"],
+    [`${next}&$select=id&$select=id`, "next_link_duplicate_parameter"],
+    [next, "next_link_missing_parameter"],
+  ])("classifies rejected next links with a fixed diagnostic", (link, diagnostic) => {
+    try { validateNextLink(link!, "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$select=id"); throw new Error("expected rejection"); }
+    catch (error) {
+      expect(error).toMatchObject({ code: "continuation_invalid", diagnostic });
+      expect(JSON.stringify(error)).not.toContain("private-canary");
+    }
+  });
   it("continues an empty page using the complete returned URL while hiding bearer-like annotations", async () => {
     const { client, send } = setup();
     send.mockResolvedValueOnce(response(200, { value: [], "@odata.nextLink": next })).mockResolvedValueOnce(response(200, { value: [{ id: "x", "@microsoft.graph.downloadUrl": "private-link" }] }));

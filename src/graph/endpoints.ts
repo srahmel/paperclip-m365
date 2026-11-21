@@ -83,15 +83,19 @@ export function validateRequest(request: GraphRequest) {
 }
 
 export function validateNextLink(value: unknown, original: string): string {
-  if (typeof value !== "string" || value.length > 16_384 || /[\x00-\x20\\]/.test(value)) throw new GraphError("continuation_invalid");
-  let next: URL; try { next = new URL(value); } catch { throw new GraphError("continuation_invalid"); }
+  if (typeof value !== "string" || value.length > 16_384 || /[\x00-\x20\\]/.test(value)) throw new GraphError("continuation_invalid", undefined, "failed", "next_link_format");
+  let next: URL; try { next = new URL(value); } catch { throw new GraphError("continuation_invalid", undefined, "failed", "next_link_format"); }
   const first = new URL(original);
-  if (next.origin !== GRAPH_ORIGIN || next.username || next.password || next.hash || next.pathname !== first.pathname) throw new GraphError("continuation_invalid");
+  if (next.origin !== GRAPH_ORIGIN || next.username || next.password || next.hash) throw new GraphError("continuation_invalid", undefined, "failed", "next_link_origin");
+  if (next.pathname !== first.pathname) throw new GraphError("continuation_invalid", undefined, "failed", "next_link_path");
   const originalParameters = first.searchParams;
   for (const [key, val] of next.searchParams) {
-    if (!["$skip", "$skiptoken", "$skipToken"].includes(key) && (!originalParameters.has(key) || originalParameters.get(key) !== val)) throw new GraphError("continuation_invalid");
-    if (next.searchParams.getAll(key).length !== 1) throw new GraphError("continuation_invalid");
+    if (!["$skip", "$skiptoken", "$skipToken"].includes(key)) {
+      if (!originalParameters.has(key)) throw new GraphError("continuation_invalid", undefined, "failed", "next_link_added_parameter");
+      if (originalParameters.get(key) !== val) throw new GraphError("continuation_invalid", undefined, "failed", "next_link_changed_parameter");
+    }
+    if (next.searchParams.getAll(key).length !== 1) throw new GraphError("continuation_invalid", undefined, "failed", "next_link_duplicate_parameter");
   }
-  for (const [key, val] of originalParameters) if (next.searchParams.get(key) !== val) throw new GraphError("continuation_invalid");
+  for (const [key, val] of originalParameters) if (next.searchParams.get(key) !== val) throw new GraphError("continuation_invalid", undefined, "failed", "next_link_missing_parameter");
   return value;
 }

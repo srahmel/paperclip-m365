@@ -234,7 +234,7 @@ export class DomainRuntime {
           // Neither arbitrary domain nor provider exception text crosses the tool boundary.
           const code = error instanceof GraphError ? error.code : error instanceof GovernanceError &&
             ["input_invalid", "permission_denied", "operation_forbidden", "operation_invalidated", "agent_unavailable", "connection_unavailable", "payload_too_large"].includes(error.code) ? error.code : "domain_unavailable";
-          return { error: code };
+          return { error: code, ...(error instanceof GraphError && error.diagnostic ? { diagnostic: error.diagnostic } : {}) };
         }
       });
     }
