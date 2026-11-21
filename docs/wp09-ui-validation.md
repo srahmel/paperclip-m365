@@ -77,3 +77,25 @@ IDs and pilot scopes, including persistence after reload. It also confirmed
 that the cache reference persisted despite a false failure message caused by
 the former order-sensitive comparison. Browser acceptance of the comparison
 fix remains pending; no Microsoft sign-in or consent is part of these checks.
+
+## Asynchronous sign-in recovery
+
+The default start/reactivation path resolves company configuration and its
+cache-key reference while the human action still has an active host invocation.
+Only that authentication operation retains the resolved dependencies while
+waiting for Microsoft; later operations resolve their own current dependencies.
+Status and disconnect remain database-only when authentication configuration is
+broken. An unavailable key fails before creating another pending connection or
+contacting Microsoft.
+
+Terminal authentication now loads and displays the connection result, including
+localized allowlisted error explanations. The one-time Microsoft challenge is
+retained across subsequent pending polls and cleared when the attempt ends or
+is replaced. Stale terminal status responses are rejected by the action epoch.
+
+Regression coverage models an asynchronous host RPC whose authorization expires
+when the start action returns, then completes both new sign-in and reactivation.
+It verifies encrypted persistence without a late configuration/secret RPC and
+failure before mutation when the key is unavailable. The full local verification
+passed 513 Vitest and 12 Node tests, typecheck, policy, build and package checks.
+Real Microsoft authentication and mailbox access remain separate live evidence.

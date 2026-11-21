@@ -10,6 +10,7 @@ import { GovernancePanel } from "./governance-panel.js";
 import { TelemetryPanel } from "./telemetry-panel.js";
 import { settingsStyles } from "./settings-styles.js";
 import { AppSetup } from "./app-setup.js";
+import { connectionErrorText } from "./connection-status.js";
 
 type ScaffoldStatus = {
   status: "ready";
@@ -120,13 +121,20 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         onUpdate: (next) => {
           if (!actionEpoch.isCurrent(generation)) return;
           setAuthenticationSession(next);
-          setChallenge(next.challenge ?? null);
+          // The host delivers the challenge once. Keep it until this attempt ends.
+          if (next.challenge) setChallenge(next.challenge);
         },
-        onTerminal: () => {
+        onTerminal: (terminal) => {
           if (!actionEpoch.isCurrent(generation)) return;
           setAuthenticationSession(null);
           setChallenge(null);
-          setConnection(null);
+          setActionError(terminal.state === "failed");
+          void loadStatus({ connectionId: terminal.connectionId }).then((result) => {
+            if (!actionEpoch.isCurrent(generation)) return;
+            setConnection(result as PublicConnection);
+          }, () => {
+            if (actionEpoch.isCurrent(generation)) setActionError(true);
+          });
         },
         onError: () => {
           if (!actionEpoch.isCurrent(generation)) return;
@@ -195,6 +203,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         </section>
       ) : null}
       {connection ? <output aria-live="polite">{connection.displayName}: {connection.status}</output> : null}
+      {connection?.errorCode ? <p role="alert">{connectionErrorText(connection.errorCode, locale)}</p> : null}
       </section>
       <section className="m365-section" aria-label={t.accessHeading}>
       <h3>{t.accessHeading}</h3>

@@ -6,6 +6,8 @@ import manifest from "../src/manifest.js";
 import { createM365Plugin } from "../src/plugin.js";
 import plugin from "../src/worker.js";
 import { TelemetryService } from "../src/telemetry/telemetry-service.js";
+import { SqlConnectionStore } from "../src/auth/sql-connection-store.js";
+import { MsalDeviceCodeProvider } from "../src/auth/msal-provider.js";
 
 describe("M365 plugin scaffold", () => {
   it.each([["provider_unavailable", "provider"], ["consent_revoked", "token"], ["cache_invalid", "token"]])("classifies synchronous %s without private provider data", async (code, errorClass) => {
@@ -64,6 +66,71 @@ describe("M365 plugin scaffold", () => {
     signInScopes: ["User.Read"],
     cacheEncryptionKey: { type: "secret_ref", secretId: "cache-key", version: "latest" },
   };
+  it.each(["start-sign-in", "reactivate"])("resolves scoped host dependencies before %s returns and completes authentication afterwards", async (action) => {
+    const sessions = new AuthenticationSessionRegistry();
+    const store = new ActionMemoryStore();
+    const spies = [
+      vi.spyOn(SqlConnectionStore.prototype, "create").mockImplementation((...args) => store.create(...args)),
+      vi.spyOn(SqlConnectionStore.prototype, "find").mockImplementation((...args) => store.find(...args)),
+      vi.spyOn(SqlConnectionStore.prototype, "update").mockImplementation((...args) => store.update(...args)),
+      vi.spyOn(SqlConnectionStore.prototype, "readCache").mockImplementation((...args) => store.readCache(...args)),
+      vi.spyOn(SqlConnectionStore.prototype, "compareAndSwapCache").mockImplementation((...args) => store.compareAndSwapCache(...args)),
+      vi.spyOn(SqlConnectionStore.prototype, "disconnect").mockImplementation((...args) => store.disconnect(...args)),
+    ];
+    const companyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const connectionId = "11111111-1111-4111-8111-111111111111";
+    const tenantId = "22222222-2222-4222-8222-222222222222";
+    let finish!: () => void;
+    const provider = vi.spyOn(MsalDeviceCodeProvider.prototype, "signIn").mockImplementation(async (input) => {
+      input.onChallenge?.({ userCode: "synthetic-device-code", verificationUri: "https://microsoft.example.test/device", expiresAt: new Date(Date.now() + 60_000).toISOString() });
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { account: { homeAccountId: "synthetic-home", tenantId, username: "synthetic@example.test" }, serializedCache: "synthetic-private-cache" };
+    });
+    try {
+      const harness = createTestHarness({ manifest }); seedConnectionManagers(harness);
+      let invocationActive = true;
+      const config = vi.spyOn(harness.ctx.config, "get").mockImplementation(async () => {
+        // A real host RPC responds asynchronously, after the start action could have ended.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (!invocationActive) throw new Error("expired invocation scope");
+        return validConfig;
+      });
+      const secret = vi.spyOn(harness.ctx.secrets, "resolve").mockImplementation(async () => {
+        if (!invocationActive) throw new Error("expired invocation scope");
+        return Buffer.alloc(32, 7).toString("base64");
+      });
+      if (action === "reactivate") await store.create({ companyId, id: connectionId, displayName: "Synthetic", expectedTenantId: tenantId, shareable: false, tenantId: null, homeAccountId: null, accountUsername: null, status: "blocked", errorCode: "key_unavailable", generation: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      await createM365Plugin(undefined, sessions).definition.setup(harness.ctx);
+      const pending = await harness.performAction<{ operationId: string; connectionId: string }>(action, { connectionId, expectedTenantId: tenantId, displayName: "Synthetic" }, { companyId, actor: { type: "user", userId: "user-a" } });
+      invocationActive = false;
+      expect(config).toHaveBeenCalledOnce();
+      expect(secret).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(provider).toHaveBeenCalledOnce());
+      finish();
+      await vi.waitFor(() => expect(sessions.read({ ...pending, companyId, initiatorUserId: "user-a" }).state).toBe("completed"));
+      expect((await store.find(companyId, connectionId))?.status).toBe("connected");
+      expect(store.caches.size).toBe(1);
+      expect(config).toHaveBeenCalledOnce();
+      expect(secret).toHaveBeenCalledOnce();
+      expect(JSON.stringify(harness.logs)).not.toContain("synthetic-private-cache");
+    } finally { finish?.(); await sessions.shutdown(); provider.mockRestore(); spies.forEach((spy) => spy.mockRestore()); }
+  });
+
+  it("rejects an unavailable sign-in key before creating a connection or contacting Microsoft", async () => {
+    const sessions = new AuthenticationSessionRegistry();
+    const harness = createTestHarness({ manifest }); seedConnectionManagers(harness);
+    vi.spyOn(harness.ctx.config, "get").mockResolvedValue(validConfig);
+    vi.spyOn(harness.ctx.secrets, "resolve").mockRejectedValue(new Error("private-backend-canary"));
+    const create = vi.spyOn(SqlConnectionStore.prototype, "create");
+    const provider = vi.spyOn(MsalDeviceCodeProvider.prototype, "signIn");
+    try {
+      await createM365Plugin(undefined, sessions).definition.setup(harness.ctx);
+      await expect(harness.performAction("start-sign-in", { expectedTenantId: "22222222-2222-4222-8222-222222222222", displayName: "Synthetic" }, { companyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", actor: { type: "user", userId: "user-a" } })).rejects.toThrow(/^key_unavailable$/);
+      expect(create).not.toHaveBeenCalled();
+      expect(provider).not.toHaveBeenCalled();
+      expect(JSON.stringify(harness.logs)).not.toContain("private-backend-canary");
+    } finally { await sessions.shutdown(); create.mockRestore(); provider.mockRestore(); }
+  });
   it("declares only the capabilities needed by its schema and settings entry", () => {
     expect(manifest).toMatchObject({
       id: "srahmel.m365",
