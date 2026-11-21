@@ -175,6 +175,26 @@ describe("Graph retries, failures and authority", () => {
 
 describe("opaque pagination and download boundaries", () => {
   const next = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skiptoken=opaque";
+  it("accepts the same Outlook folder key in an OData next link without rewriting its URL", async () => {
+    const { client, send, authorize } = setup();
+    const request = { ...read, path: "/me/mailFolders/AaBb%3D/messages", query: { "$top": "1", "$select": "id" } };
+    const providerNext = "https://graph.microsoft.com/v1.0/me/mailFolders('AaBb=')/messages?$select=id&$top=1&$skip=1";
+    send.mockResolvedValueOnce(response(200, { value: [{ id: "first" }], "@odata.nextLink": providerNext }))
+      .mockResolvedValueOnce(response(200, { value: [{ id: "second" }] }));
+    const first = await client.request(request);
+    expect(first).toMatchObject({ data: { value: [{ id: "first" }] }, complete: false });
+    expect(first.continuation).toBeTruthy();
+    const last = await client.request({ ...request, continuation: first.continuation });
+    expect(last.complete).toBe(true); expect(send.mock.calls[1]![0].url).toBe(providerNext);
+    expect(authorize).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    "/v1.0/me/mailFolders('aabb=')/messages", "/v1.0/me/mailFolders('foreign')/messages",
+    "/v1.0/users/foreign/mailFolders('AaBb=')/messages", "/beta/me/mailFolders('AaBb=')/messages",
+    "/v1.0/me/mailFolders('AaBb=')/childFolders", "/v1.0/me/mailFolders('AaBb%252F')/messages",
+  ])("rejects changed OData folder, identity, version or collection", (path) => {
+    expect(() => validateNextLink(`https://graph.microsoft.com${path}?$skip=1`, "https://graph.microsoft.com/v1.0/me/mailFolders/AaBb%3D/messages")).toThrow("continuation_invalid");
+  });
   it.each([
     ["not-a-url", "next_link_format"],
     ["https://evil.test/private-canary", "next_link_origin"],
