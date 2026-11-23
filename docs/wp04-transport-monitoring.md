@@ -19,6 +19,14 @@ generation, Microsoft identity, operation and query. Continuation URLs must reta
 the permitted Graph origin and resource scope. Handles expire, are bounded and
 become invalid after worker restart. Partial results explicitly report incomplete
 pagination. JSON responses are capped at 6 MiB; binary transfers at 4 MiB.
+Rejected provider next links return `continuation_invalid` with an optional
+fixed `diagnostic` code describing format, origin, path or parameter validation.
+These codes contain no provider URLs, query values or resource identifiers.
+For the fixed Outlook `/me/mailFolders/{id}/messages` collection, equivalent
+OData key parentheses and URL encoding are accepted without changing the folder
+ID's case. Foreign users, folders, collections and API versions remain rejected.
+The validated provider URL is then used unchanged, as required by
+[Microsoft's paging contract](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0).
 
 The Node HTTPS transport resolves and pins public addresses, rejects private,
 mixed and literal address destinations, checks streamed byte limits, and does

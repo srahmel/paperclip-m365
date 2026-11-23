@@ -8,6 +8,9 @@ import { translations } from "../auth/localization.js";
 import { ActionEpoch, AuthenticationPoller, type AuthenticationSession } from "./authentication-poller.js";
 import { GovernancePanel } from "./governance-panel.js";
 import { TelemetryPanel } from "./telemetry-panel.js";
+import { settingsStyles } from "./settings-styles.js";
+import { AppSetup } from "./app-setup.js";
+import { connectionErrorText } from "./connection-status.js";
 
 type ScaffoldStatus = {
   status: "ready";
@@ -54,6 +57,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
   const reactivate = usePluginAction("reactivate");
   const loadAuthenticationSession = usePluginAction("authentication-session-status");
   const [connectionId, setConnectionId] = useState("");
+  const [appReady, setAppReady] = useState(false);
   const [expectedTenantId, setExpectedTenantId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [shareable, setShareable] = useState(false);
@@ -75,6 +79,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
     setChallenge(null);
     setConnection(null);
     setConnectionId("");
+    setAppReady(false);
   }, [context.companyId, actionEpoch, authenticationPoller]);
 
   async function run(action: () => Promise<unknown>) {
@@ -94,6 +99,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
   }
 
   async function begin(action: () => Promise<unknown>) {
+    if (!appReady) return;
     const generation = actionEpoch.start();
     authenticationPoller.stop();
     setActionError(false);
@@ -115,13 +121,20 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         onUpdate: (next) => {
           if (!actionEpoch.isCurrent(generation)) return;
           setAuthenticationSession(next);
-          setChallenge(next.challenge ?? null);
+          // The host delivers the challenge once. Keep it until this attempt ends.
+          if (next.challenge) setChallenge(next.challenge);
         },
-        onTerminal: () => {
+        onTerminal: (terminal) => {
           if (!actionEpoch.isCurrent(generation)) return;
           setAuthenticationSession(null);
           setChallenge(null);
-          setConnection(null);
+          setActionError(terminal.state === "failed");
+          void loadStatus({ connectionId: terminal.connectionId }).then((result) => {
+            if (!actionEpoch.isCurrent(generation)) return;
+            setConnection(result as PublicConnection);
+          }, () => {
+            if (actionEpoch.isCurrent(generation)) setActionError(true);
+          });
         },
         onError: () => {
           if (!actionEpoch.isCurrent(generation)) return;
@@ -146,39 +159,42 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
   }
 
   return (
-    <main style={{ display: "grid", gap: "0.75rem", maxWidth: "48rem" }}>
+    <div className="m365-settings">
+      <style>{settingsStyles}</style>
+      <header>
       <h2>{t.title}</h2>
-      <p>{t.description}</p>
+      <p className="m365-hint">{t.setupHint}</p>
+      </header>
       {loading ? <p>…</p> : null}
-      {error || actionError || !context.companyId ? <p>{t.unavailable}</p> : null}
-      {data ? (
-        <dl>
-          <dt>Plugin version</dt>
-          <dd>{data.version}</dd>
-          <dt>Worker status</dt>
-          <dd>{data.status}</dd>
-          <dt>Microsoft integration</dt>
-          <dd>{data.microsoftIntegration}</dd>
-        </dl>
-      ) : null}
-      <label>{t.connectionId}<input value={connectionId} onChange={(event) => setConnectionId(event.target.value)} /></label>
-      <label>{t.tenantId}<input value={expectedTenantId} onChange={(event) => setExpectedTenantId(event.target.value)} /></label>
-      <label>{t.displayName}<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
-      <label>
+      {error || actionError || !context.companyId ? <p role="alert">{t.unavailable}</p> : null}
+      {context.companyId ? <AppSetup key={context.companyId} companyId={context.companyId} locale={locale} onLoaded={setExpectedTenantId} onReady={setAppReady} /> : null}
+      <section className="m365-section" aria-label={t.accountHeading}>
+      <h3>{t.accountHeading}</h3>
+      <div className="m365-fields">
+      <label>{t.displayName}<input name="m365-display-name" autoComplete="off" placeholder={t.nameExample} value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
+      <label>{t.tenantId}<input name="m365-tenant-id" autoComplete="off" spellCheck={false} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" aria-describedby="m365-tenant-help" value={expectedTenantId} onChange={(event) => setExpectedTenantId(event.target.value)} /><span id="m365-tenant-help" className="m365-hint">{t.tenantHelp}</span></label>
+      </div>
+      <label className="m365-checkbox">
         <input type="checkbox" checked={shareable} onChange={(event) => setShareable(event.target.checked)} />
         {t.shareable}
       </label>
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        <button type="button" onClick={() => run(() => loadStatus({ connectionId }))}>{t.status}</button>
-        <button type="button" onClick={() => begin(() => startSignIn(buildStartSignInParams({
+      <div className="m365-actions">
+        <button className="m365-primary" disabled={!appReady} type="button" onClick={() => begin(() => startSignIn(buildStartSignInParams({
           connectionId,
           expectedTenantId,
           displayName,
           shareable,
         })))}>{t.signIn}</button>
-        <button type="button" onClick={() => { void disconnectConnection(); }}>{t.disconnect}</button>
-        <button type="button" onClick={() => begin(() => reactivate({ connectionId }))}>{t.reactivate}</button>
       </div>
+      <details>
+        <summary>{t.existingHeading}</summary>
+        <label>{t.connectionId}<input name="m365-connection-id" autoComplete="off" spellCheck={false} aria-describedby="m365-connection-help" value={connectionId} onChange={(event) => setConnectionId(event.target.value)} /><span id="m365-connection-help" className="m365-hint">{t.connectionHelp}</span></label>
+        <div className="m365-actions">
+          <button type="button" onClick={() => run(() => loadStatus({ connectionId }))}>{t.status}</button>
+          <button type="button" disabled={!appReady} onClick={() => begin(() => reactivate({ connectionId }))}>{t.reactivate}</button>
+        </div>
+        <details><summary>{t.disconnect}</summary><p className="m365-hint">{t.disconnectHelp}</p><button type="button" onClick={() => { void disconnectConnection(); }}>{t.disconnect}</button></details>
+      </details>
       {challenge ? (
         <section>
           <p>{t.verification}</p>
@@ -186,14 +202,23 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
           <output>{challenge.userCode}</output>
         </section>
       ) : null}
-      {connection ? <output>{connection.displayName}: {connection.status}</output> : null}
+      {connection ? <output aria-live="polite">{connection.displayName}: {connection.status}</output> : null}
+      {connection?.errorCode ? <p role="alert">{connectionErrorText(connection.errorCode, locale)}</p> : null}
+      </section>
+      <section className="m365-section" aria-label={t.accessHeading}>
+      <h3>{t.accessHeading}</h3>
+      <p className="m365-hint">{t.accessHelp}</p>
       {context.companyId && connectionId ? <GovernancePanel
         key={`${context.companyId}:${connectionId}`}
         companyId={context.companyId}
         connectionId={connectionId}
         locale={locale}
       /> : null}
-      {context.companyId ? <TelemetryPanel key={context.companyId} locale={locale} /> : null}
-    </main>
+      </section>
+      <details><summary>{t.technicalHeading}</summary>
+        {data ? <dl><dt>Plugin version</dt><dd>{data.version}</dd><dt>Worker status</dt><dd>{data.status}</dd><dt>Microsoft integration</dt><dd>{data.microsoftIntegration}</dd></dl> : null}
+        {context.companyId ? <TelemetryPanel key={context.companyId} locale={locale} /> : null}
+      </details>
+    </div>
   );
 }

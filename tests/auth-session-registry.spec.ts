@@ -8,6 +8,34 @@ const binding = {
 };
 
 describe("AuthenticationSessionRegistry", () => {
+  it("keeps 256 simultaneous challenges private and rejects overflow without evicting active users", async () => {
+    const registry = new AuthenticationSessionRegistry();
+    const bindings = Array.from({ length: 256 }, (_, index) => ({
+      companyId: `company-${Math.floor(index / 32)}`, initiatorUserId: `user-${index}`, connectionId: `connection-${index % 32}`,
+    }));
+    try {
+      const operations = bindings.map((owner, index) => registry.start({ ...owner, run: async ({ signal, onChallenge }) => {
+        onChallenge({ userCode: `synthetic-code-${index}`, verificationUri: "https://example.test/device", expiresAt: new Date(Date.now() + 60_000).toISOString() });
+        await untilAborted(signal);
+      } }));
+      await Promise.resolve();
+      expect(() => registry.start({ ...binding, run: async () => undefined })).toThrow("authentication_session_capacity");
+      for (let index = 0; index < bindings.length; index += 1) {
+        const owner = bindings[index];
+        const operationId = operations[index];
+        expect(() => registry.read({ ...owner, initiatorUserId: `intruder-${index}`, operationId })).toThrow("authentication_session_not_found");
+        expect(() => registry.read({ ...owner, companyId: "foreign-company", operationId })).toThrow("authentication_session_not_found");
+        expect(registry.read({ ...owner, operationId }).challenge?.userCode).toBe(`synthetic-code-${index}`);
+        expect(registry.read({ ...owner, operationId })).not.toHaveProperty("challenge");
+      }
+      await registry.cancelConnection(bindings[0].companyId, bindings[0].connectionId);
+      expect(() => registry.read({ ...bindings[0], operationId: operations[0] })).toThrow("authentication_session_not_found");
+      expect(registry.read({ ...bindings[32], operationId: operations[32] }).state).toBe("challenge");
+      expect(() => registry.start({ ...binding, run: async () => undefined })).not.toThrow();
+    } finally { await registry.shutdown(); }
+    expect(registry.idleState()).toBe("none");
+  });
+
   afterEach(() => vi.useRealTimers());
   it("reports background work until the last parallel operation completes", async () => {
     const registry = new AuthenticationSessionRegistry({

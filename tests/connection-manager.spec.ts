@@ -99,6 +99,61 @@ const cacheKey: CacheKey = {
 };
 
 describe("ConnectionManager", () => {
+  it("isolates 100 concurrent accounts across five companies through refresh, restart and disconnect", async () => {
+    const store = new MemoryConnectionStore();
+    const users = Array.from({ length: 100 }, (_, index) => ({
+      companyId: `company-${Math.floor(index / 20)}`,
+      connectionId: `connection-${index % 20}`,
+      expectedTenantId: `tenant-${Math.floor(index / 20)}`,
+      displayName: `Person ${index}`, shareable: false,
+    }));
+    const provider: MicrosoftAuthProvider = {
+      async signIn({ connectionId, expectedTenantId }) {
+        const identity = `${expectedTenantId}:${connectionId}`;
+        return { account: { homeAccountId: identity, tenantId: expectedTenantId, username: `${identity}@example.test` }, serializedCache: `${identity}:0` };
+      },
+      async acquireToken({ account, serializedCache }) {
+        const prefix = `${account.homeAccountId}:`;
+        expect(serializedCache.startsWith(prefix)).toBe(true);
+        const round = Number(serializedCache.slice(prefix.length));
+        expect(Number.isInteger(round)).toBe(true);
+        await Promise.resolve();
+        return { ["accessToken"]: `synthetic-${account.homeAccountId}-${round}`, serializedCache: `${prefix}${round + 1}` };
+      },
+    };
+    const dependencies = { store, provider, resolveCacheKey: async (companyId: string) => ({
+      value: Buffer.alloc(32, Number(companyId.split("-")[1]) + 1).toString("base64"), version: "v1",
+    }) };
+    let manager = new ConnectionManager(dependencies);
+    await Promise.all(users.map((user) => manager.createAndSignIn(user)));
+    for (let round = 0; round < 3; round += 1) {
+      manager = new ConnectionManager(dependencies);
+      const tokens = await Promise.all(users.map((user) => manager.acquireAccessToken(user.companyId, user.connectionId, ["User.Read"])));
+      expect(new Set(tokens).size).toBe(users.length);
+      users.forEach((user, index) => expect(tokens[index]).toBe(`synthetic-${user.expectedTenantId}:${user.connectionId}-${round}`));
+    }
+    expect(store.caches.size).toBe(100);
+    expect(new Set([...store.caches.values()].map((cache) => cache.envelope.ciphertext)).size).toBe(100);
+    await Promise.all(users.filter((_, index) => index % 2 === 0).map((user) => manager.disconnect(user.companyId, user.connectionId)));
+    const results = await Promise.allSettled(users.map((user) => manager.acquireAccessToken(user.companyId, user.connectionId, ["User.Read"])));
+    results.forEach((result, index) => {
+      if (index % 2 === 0) expect(result).toEqual({ status: "rejected", reason: new ConnectionAccessError("connection_unavailable") });
+      else expect(result).toEqual({ status: "fulfilled", value: `synthetic-${users[index].expectedTenantId}:${users[index].connectionId}-3` });
+    });
+    expect(store.caches.size).toBe(50);
+  });
+
+  it("rejects a cache copied between companies even when connection IDs and encryption keys match", async () => {
+    const store = new MemoryConnectionStore();
+    const provider = new SyntheticProvider({ same: { homeAccountId: "account", tenantId: "tenant", username: "synthetic@example.test" } });
+    const manager = new ConnectionManager({ store, provider, resolveCacheKey: async () => cacheKey });
+    for (const companyId of ["company-a", "company-b"]) await manager.createAndSignIn({ companyId, connectionId: "same", expectedTenantId: "tenant", displayName: "Person", shareable: false });
+    store.caches.set("company-b:same", structuredClone(store.caches.get("company-a:same")!));
+    await expect(manager.acquireAccessToken("company-b", "same", ["User.Read"])).rejects.toEqual(new ConnectionAccessError("cache_invalid"));
+    expect(provider.acquireTokenCalls).toBe(0);
+    await expect(manager.acquireAccessToken("company-a", "same", ["User.Read"])).resolves.toBe("synthetic-access-token");
+  });
+
   it("keeps synthetic accounts separated by company and connection", async () => {
     const store = new MemoryConnectionStore();
     const provider = new SyntheticProvider({

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import manifest from "../src/manifest.js";
 import { resolveLocale, translations } from "../src/auth/localization.js";
 import { buildStartSignInParams, SettingsPage } from "../src/ui/index.js";
+import { connectionErrorText } from "../src/ui/connection-status.js";
 
 describe("settings UI entrypoint", () => {
   it("exports the component declared by the manifest", () => {
@@ -31,5 +32,13 @@ describe("settings UI entrypoint", () => {
       shareable: false,
     });
     expect(params).not.toHaveProperty("connectionId");
+  });
+
+  it("explains known authentication failures and never renders arbitrary backend text", () => {
+    expect(connectionErrorText("key_unavailable", "de-DE")).toContain("Cache-Schlüssel");
+    expect(connectionErrorText("key_unavailable", "en")).toContain("secret reference");
+    expect(connectionErrorText("tenant_mismatch", "en")).toContain("different Microsoft tenant");
+    expect(connectionErrorText("private-backend-canary", "fr")).toBe(connectionErrorText("unknown", "en"));
+    expect(connectionErrorText("private-backend-canary", "de")).not.toContain("private-backend-canary");
   });
 });

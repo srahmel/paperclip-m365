@@ -42,6 +42,8 @@ export function createM365Plugin(
   let domainRuntime: DomainRuntime | undefined;
   const resolveManager = managerFactory ?? ((ctx, companyId) =>
     createRuntimeManager(ctx, companyId, authenticationSessions));
+  const resolveSignInManager = managerFactory ?? ((ctx, companyId) =>
+    createRuntimeManager(ctx, companyId, authenticationSessions, true));
   return definePlugin({
     async setup(ctx) {
       runtimeContext = ctx;
@@ -127,7 +129,7 @@ export function createM365Plugin(
         const expectedTenantId = requireUuid(params.expectedTenantId, "tenant_id_invalid");
         const displayName = requireDisplayName(params.displayName);
         const shareable = params.shareable === true;
-        const manager = await resolveManager(ctx, companyId);
+        const manager = await resolveSignInManager(ctx, companyId);
         const reservation = authenticationSessions.reserve();
         try {
           const pendingConnection = await manager.createPendingConnection({
@@ -173,7 +175,7 @@ export function createM365Plugin(
       registerAction("reactivate", async (params, actionContext) => {
         const { companyId, userId } = await requireConnectionManager(ctx, actionContext);
         const connectionId = requireUuid(params.connectionId, "connection_id_invalid");
-        const manager = await resolveManager(ctx, companyId);
+        const manager = await resolveSignInManager(ctx, companyId);
         const reservation = authenticationSessions.reserve();
         try {
           const pendingConnection = await manager.prepareReactivation(companyId, connectionId);
@@ -222,10 +224,28 @@ async function createRuntimeManager(
   ctx: PluginContext,
   companyId: string,
   authenticationSessions: AuthenticationSessionRegistry,
+  prepareSignIn = false,
 ): Promise<ConnectionManager> {
+  // Resolve scoped host dependencies before the start action returns. Background
+  // device authentication must not reuse an expired host invocation for these reads.
+  // This snapshot belongs only to this authentication operation, never a shared cache.
+  let signInConfig: Awaited<ReturnType<typeof readAuthConfig>> | undefined;
+  let signInKey: CacheKey | undefined;
+  if (prepareSignIn) {
+    try {
+      signInConfig = await readAuthConfig(ctx, companyId);
+      signInKey = {
+        value: await ctx.secrets.resolve(signInConfig.cacheEncryptionKey, { companyId, configPath: "cacheEncryptionKey" }),
+        version: JSON.stringify(signInConfig.cacheEncryptionKey.version ?? "latest"),
+      };
+      decodeCacheKey(signInKey.value);
+    } catch {
+      throw new ConnectionAccessError("key_unavailable");
+    }
+  }
   // Database-only operations remain usable even when Microsoft configuration is broken.
   const provider = async () => {
-    const config = await readAuthConfig(ctx, companyId);
+    const config = signInConfig ?? await readAuthConfig(ctx, companyId);
     return new MsalDeviceCodeProvider(config);
   };
   return new ConnectionManager({
@@ -236,6 +256,7 @@ async function createRuntimeManager(
     },
     trackOperation: (operation) => authenticationSessions.track(operation),
     resolveCacheKey: async (): Promise<CacheKey> => {
+      if (signInKey) return signInKey;
       const { cacheEncryptionKey } = await readAuthConfig(ctx, companyId);
       return {
         value: await ctx.secrets.resolve(cacheEncryptionKey, { companyId, configPath: "cacheEncryptionKey" }),

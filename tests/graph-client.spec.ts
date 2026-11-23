@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GraphClient, retryAfterSeconds } from "../src/graph/client.js";
 import { GraphError, HttpFailure, FILE_LIMIT, JSON_LIMIT, type GraphRequest, type HttpResponse } from "../src/graph/types.js";
 import { operationTypes } from "../src/governance/types.js";
-import { validateRequest } from "../src/graph/endpoints.js";
+import { validateNextLink, validateRequest } from "../src/graph/endpoints.js";
 
 const binding = { companyId: "company", agentId: "agent", projectId: "project", connectionId: "connection", generation: 1, tenantId: "tenant", homeAccountId: "account" };
 const read: GraphRequest = { binding, operationType: "mail-list-messages", method: "GET", path: "/me/mailFolders/inbox/messages" };
@@ -175,6 +175,41 @@ describe("Graph retries, failures and authority", () => {
 
 describe("opaque pagination and download boundaries", () => {
   const next = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skiptoken=opaque";
+  it("accepts the same Outlook folder key in an OData next link without rewriting its URL", async () => {
+    const { client, send, authorize } = setup();
+    const request = { ...read, path: "/me/mailFolders/AaBb%3D/messages", query: { "$top": "1", "$select": "id" } };
+    const providerNext = "https://graph.microsoft.com/v1.0/me/mailFolders('AaBb=')/messages?$select=id&$top=1&$skip=1";
+    send.mockResolvedValueOnce(response(200, { value: [{ id: "first" }], "@odata.nextLink": providerNext }))
+      .mockResolvedValueOnce(response(200, { value: [{ id: "second" }] }));
+    const first = await client.request(request);
+    expect(first).toMatchObject({ data: { value: [{ id: "first" }] }, complete: false });
+    expect(first.continuation).toBeTruthy();
+    const last = await client.request({ ...request, continuation: first.continuation });
+    expect(last.complete).toBe(true); expect(send.mock.calls[1]![0].url).toBe(providerNext);
+    expect(authorize).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    "/v1.0/me/mailFolders('aabb=')/messages", "/v1.0/me/mailFolders('foreign')/messages",
+    "/v1.0/users/foreign/mailFolders('AaBb=')/messages", "/beta/me/mailFolders('AaBb=')/messages",
+    "/v1.0/me/mailFolders('AaBb=')/childFolders", "/v1.0/me/mailFolders('AaBb%252F')/messages",
+  ])("rejects changed OData folder, identity, version or collection", (path) => {
+    expect(() => validateNextLink(`https://graph.microsoft.com${path}?$skip=1`, "https://graph.microsoft.com/v1.0/me/mailFolders/AaBb%3D/messages")).toThrow("continuation_invalid");
+  });
+  it.each([
+    ["not-a-url", "next_link_format"],
+    ["https://evil.test/private-canary", "next_link_origin"],
+    [next.replace("inbox", "foreign"), "next_link_path"],
+    [`${next}&$expand=private-canary`, "next_link_added_parameter"],
+    [`${next}&$select=private-canary`, "next_link_changed_parameter"],
+    [`${next}&$select=id&$select=id`, "next_link_duplicate_parameter"],
+    [next, "next_link_missing_parameter"],
+  ])("classifies rejected next links with a fixed diagnostic", (link, diagnostic) => {
+    try { validateNextLink(link!, "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$select=id"); throw new Error("expected rejection"); }
+    catch (error) {
+      expect(error).toMatchObject({ code: "continuation_invalid", diagnostic });
+      expect(JSON.stringify(error)).not.toContain("private-canary");
+    }
+  });
   it("continues an empty page using the complete returned URL while hiding bearer-like annotations", async () => {
     const { client, send } = setup();
     send.mockResolvedValueOnce(response(200, { value: [], "@odata.nextLink": next })).mockResolvedValueOnce(response(200, { value: [{ id: "x", "@microsoft.graph.downloadUrl": "private-link" }] }));
