@@ -260,7 +260,7 @@ export class GovernanceService {
     requireId(companyId); requireId(operationId);
     const record = await this.#storage(() => this.#store.findOperation(companyId, operationId));
     if (!record || record.companyId !== companyId || record.id !== operationId) throw new GovernanceError("operation_not_found");
-    if (record.metadataPurgedAt!==null || [record.connectionId,record.agentId,record.runId,record.projectId,record.resource,record.policyRevision,record.connectionGeneration,record.tenantId,record.homeAccountId].some((value)=>value===null)) throw new GovernanceError("operation_not_found");
+    if (record.metadataPurgedAt!==null || [record.connectionId,record.agentId,record.runId,record.resource,record.policyRevision,record.connectionGeneration,record.tenantId,record.homeAccountId].some((value)=>value===null)) throw new GovernanceError("operation_not_found");
     return record as FullOperationRecord;
   }
 

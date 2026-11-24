@@ -81,6 +81,7 @@ try {
         { migrationKey: "004_governed_operations.sql", status: "applied" },
         { migrationKey: "005_private_operation_results.sql", status: "applied" },
         { migrationKey: "006_telemetry.sql", status: "applied" },
+        { migrationKey: "007_projectless_operations.sql", status: "applied" },
       ],
       `${expectedStatus} changed the migration ledger`,
     );

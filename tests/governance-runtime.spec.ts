@@ -50,6 +50,17 @@ async function setup() {
 }
 
 describe("governance human runtime boundary", () => {
+  it("accepts the host's projectless context for connection status and rejects malformed identities", async () => {
+    const { harness, service } = await setup();
+    expect(await harness.executeTool("connection-get-status", { connectionId }, { ...identity, projectId: "" }))
+      .toEqual({ data: { connectionId, status: "connected" } });
+    service.getPolicy.mockClear();
+    for (const field of ["companyId", "agentId", "runId", "projectId"]) {
+      expect(await harness.executeTool("connection-get-status", { connectionId }, { ...identity, [field]: "malformed" }))
+        .toEqual({ error: "input_invalid" });
+    }
+    expect(service.getPolicy).not.toHaveBeenCalled();
+  });
   it("uses only the authenticated human when invalidating requests before key rotation", async () => {
     const {harness,service}=await setup();
     await expect(harness.performAction("operation-invalidate",{operationId,userId:"spoofed",companyId:foreignCompanyId},human)).resolves.toMatchObject({state:"invalidated"});
@@ -202,7 +213,7 @@ describe("governance agent tool boundary", () => {
     expect(await harness.executeTool("operation-get-result",{operationId},identity)).toEqual({error:"result_unavailable"});
     expect(service.execute).not.toHaveBeenCalled();
   });
-  it.each(["companyId", "agentId", "runId", "projectId"] as const)("requires host %s before service dispatch", async (field) => {
+  it.each(["companyId", "agentId", "runId"] as const)("requires host %s before service dispatch", async (field) => {
     const { harness, service, agents } = await setup();
     const result = await harness.executeTool("operation-get-status", { operationId, ...identity }, { ...identity, [field]: "" });
     expect(result).toEqual({ error: "input_invalid" });

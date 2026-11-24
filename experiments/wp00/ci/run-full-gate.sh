@@ -67,7 +67,7 @@ assert_tap_counts 20 "$scratch/postgresql.tap"
 node "$source/$runner" --test --test-reporter=tap --test-timeout=120000 "$repo/tests/sql-connection-store.postgres.integration.ts" | tee "$scratch/wp02-postgresql.tap"
 assert_tap_counts 6 "$scratch/wp02-postgresql.tap"
 node "$source/$runner" --test --test-reporter=tap --test-timeout=120000 "$repo/tests/governance.postgres.integration.ts" | tee "$scratch/wp03-postgresql.tap"
-assert_tap_counts 11 "$scratch/wp03-postgresql.tap"
+assert_tap_counts 12 "$scratch/wp03-postgresql.tap"
 node "$source/$runner" --test --test-reporter=tap --test-timeout=120000 "$repo/tests/telemetry.postgres.integration.ts" | tee "$scratch/wp04-postgresql.tap"
 assert_tap_counts 6 "$scratch/wp04-postgresql.tap"
 export WP01_PACKAGE_PATH=$plugin_artifact
@@ -110,4 +110,4 @@ dropdb -h 127.0.0.1 -U postgres paperclip_m365_agent_gateway
 
 pg_ctl -D "$pgdata" -m fast -w stop >/dev/null
 trap - EXIT HUP INT TERM
-printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","wp02PostgresAssertions":"6/6","wp03PostgresAssertions":"11/11","wp04PostgresAssertions":"6/6","wp11PostgresAssertions":"5/5","sdkAssertions":"28/28","pluginLifecycle":"install-ready-disable-reenable-ready-disable-soft-uninstall-restore-ready","packageDigestVerifiedAt":["install","restore"],"gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'
+printf '%s\n' '{"probe":"wp01-full-isolated-matrix","status":"pass","postgresAssertions":"20/20","wp02PostgresAssertions":"6/6","wp03PostgresAssertions":"12/12","wp04PostgresAssertions":"6/6","wp11PostgresAssertions":"5/5","sdkAssertions":"28/28","pluginLifecycle":"install-ready-disable-reenable-ready-disable-soft-uninstall-restore-ready","packageDigestVerifiedAt":["install","restore"],"gateway":{"networkCalls":0,"dispatches":0},"targetExecutedReadOnly":true}'

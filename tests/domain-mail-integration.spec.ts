@@ -61,6 +61,22 @@ function fixture() {
 }
 
 describe("real mail domain / host runtime / GraphClient seam", () => {
+  it("reads and governs writes without a project while keeping project result boundaries", async () => {
+    const f = fixture();
+    const hostContext = { ...identity, projectId: "" };
+    const projectless = { ...identity, projectId: null };
+    const read = await f.harness.executeTool("mail-get-message", { connectionId, folderId: "inbox", messageId: "message" }, hostContext);
+    expect(read).toHaveProperty("data");
+    const prepared = await f.harness.executeTool("mail-prepare-send", { connectionId, message }, hostContext);
+    expect(prepared).toHaveProperty("data");
+    const operation = prepared.data as unknown as OperationRecord;
+    expect(f.records.get(operation.id)?.projectId).toBeNull();
+    await expect(f.service.status({ identity, operationId: operation.id })).rejects.toThrow("operation_not_found");
+    expect(await f.service.status({ identity: projectless, operationId: operation.id })).toMatchObject({ state: "pending" });
+    await expect(f.service.execute({ companyId, operationId: operation.id })).rejects.toThrow("operation_state_invalid");
+    await f.approve(operation);
+    expect(await f.service.execute({ companyId, operationId: operation.id })).toMatchObject({ state: "succeeded" });
+  });
   it("reports fixed continuation diagnostics without returning provider URLs or message fields", async () => {
     const f = fixture();
     f.policy.bindings[0]!.rules.push({ operationType: "mail-list-messages", resources: ["mail-folder:inbox"] });

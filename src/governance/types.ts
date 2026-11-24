@@ -21,7 +21,7 @@ export interface ConnectionPolicy {
   status: string; shareable: boolean; bindings: AgentBinding[]; approverUserIds: string[];
   tenantId: string | null; homeAccountId: string | null;
 }
-export interface AgentIdentity { companyId: string; agentId: string; runId: string; projectId: string }
+export interface AgentIdentity { companyId: string; agentId: string; runId: string; projectId: string | null }
 export interface OperationSnapshot extends AgentIdentity {
   schemaVersion: 1; connectionId: string; operationType: OperationType; resource: string;
   payload: Json; policyRevision: number; connectionGeneration: number; expiresAt: string;
@@ -50,7 +50,7 @@ export interface OperationRecord {
   privateResultEnvelope: EncryptedCache | null; privateResultExpiresAt: string | null;
   metadataPurgeAfter: string; metadataPurgedAt: string | null;
 }
-export type FullOperationRecord = OperationRecord & { [K in "connectionId" | "agentId" | "runId" | "projectId" | "resource" | "policyRevision" | "connectionGeneration" | "tenantId" | "homeAccountId"]: NonNullable<OperationRecord[K]> };
+export type FullOperationRecord = OperationRecord & { [K in "connectionId" | "agentId" | "runId" | "resource" | "policyRevision" | "connectionGeneration" | "tenantId" | "homeAccountId"]: NonNullable<OperationRecord[K]> };
 export interface GovernanceStore {
   getPolicy(companyId: string, connectionId: string): Promise<ConnectionPolicy | null>;
   setPolicy(input: { companyId: string; connectionId: string; expectedRevision: number; bindings: AgentBinding[]; approverUserIds: string[]; actorId: string }): Promise<boolean>;

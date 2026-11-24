@@ -43,6 +43,7 @@ const requiredFiles = [
   "migrations/004_governed_operations.sql",
   "migrations/005_private_operation_results.sql",
   "migrations/006_telemetry.sql",
+  "migrations/007_projectless_operations.sql",
   "package.json",
 ];
 for (const requiredFile of requiredFiles) {

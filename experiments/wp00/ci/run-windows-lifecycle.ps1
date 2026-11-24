@@ -193,7 +193,7 @@ try {
         (Join-Path $Repo 'tests/governance.postgres.integration.ts') 2>&1 |
         Tee-Object -FilePath (Join-Path $evidence 'wp03-postgresql.tap')
     if ($LASTEXITCODE -ne 0) { throw 'Windows WP03 PostgreSQL integration failed' }
-    Assert-TapCounts (Join-Path $evidence 'wp03-postgresql.tap') 11
+    Assert-TapCounts (Join-Path $evidence 'wp03-postgresql.tap') 12
 
     $phase = 'run-wp04-postgresql'
     & node --import $importUrls[0] --test --test-reporter=tap --test-timeout=120000 `
@@ -287,7 +287,7 @@ if ($primaryFailure) { exit 1 }
     postgresqlVersion = $toolVersion
     syntheticDataOnly = $true
     wp02PostgresAssertions = '6/6'
-    wp03PostgresAssertions = '11/11'
+    wp03PostgresAssertions = '12/12'
     wp04PostgresAssertions = '6/6'
     wp11PostgresAssertions = '5/5'
     authenticatedAgentGateway = 'actual-worker-jwt-http'

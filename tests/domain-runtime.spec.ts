@@ -41,7 +41,7 @@ function fixture(now?: () => number) {
 describe("domain authority boundary", () => {
   it("blocks missing host identity and missing resource grants before token or HTTP", async () => {
     const f = fixture();
-    expect(await f.harness.executeTool("mail-get-message", { connectionId, ...identity }, { ...identity, projectId: "" })).toHaveProperty("error");
+    expect(await f.harness.executeTool("mail-get-message", { connectionId, ...identity }, { ...identity, runId: "" })).toHaveProperty("error");
     f.policy.bindings = [];
     expect(await f.harness.executeTool("mail-get-message", { connectionId }, identity)).toHaveProperty("error");
     expect(f.token).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled();

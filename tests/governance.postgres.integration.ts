@@ -75,7 +75,7 @@ const store = new SqlGovernanceStore(database());
 before(async () => {
   await sql.unsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
   await sql.unsafe(`CREATE SCHEMA "${namespace}"`);
-  for (const migration of ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql", "005_private_operation_results.sql"]) {
+  for (const migration of ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql", "005_private_operation_results.sql", "006_telemetry.sql", "007_projectless_operations.sql"]) {
     const contents = await readFile(resolve(root, "migrations", migration), "utf8");
     for (const statement of contents.split(";").map((part) => part.trim()).filter(Boolean)) {
       contract.validatePluginMigrationStatement(statement, namespace);
@@ -88,7 +88,7 @@ after(async () => {
   await sql.end({ timeout: 1 });
 });
 
-async function fixture(shareable = false): Promise<OperationRecord> {
+async function fixture(shareable = false, projectId: string | null = randomUUID()): Promise<OperationRecord> {
   const connectionId = randomUUID();
   const tenantId = randomUUID();
   const homeAccountId = `synthetic-account-${randomUUID()}`;
@@ -100,7 +100,7 @@ async function fixture(shareable = false): Promise<OperationRecord> {
     bindings: [{ agentId,rules: [{ operationType: "mail-send",resources: ["folder-a"] }] }],approverUserIds: [userId],actorId: userId }), true);
   const now = Date.now();
   const operation: OperationRecord = {
-    id: randomUUID(),companyId,connectionId,agentId,runId: randomUUID(),projectId: randomUUID(),
+    id: randomUUID(),companyId,connectionId,agentId,runId: randomUUID(),projectId,
     operationType: "mail-send",resource: "folder-a",policyRevision: 1,connectionGeneration: 1,
     tenantId,homeAccountId,
     snapshotHash: "a".repeat(64),envelope,createdAt: new Date(now-1000).toISOString(),expiresAt: new Date(now+3600000).toISOString(),
@@ -111,6 +111,19 @@ async function fixture(shareable = false): Promise<OperationRecord> {
 }
 const decision = (operation: OperationRecord) => ({ companyId: operation.companyId,operationId: operation.id,snapshotHash: operation.snapshotHash,userId,approve: true,correlationId: randomUUID() });
 const reservation = (operation: OperationRecord) => ({ companyId: operation.companyId,operationId: operation.id,snapshotHash: operation.snapshotHash,executorNonce: randomUUID(),correlationId: randomUUID() });
+
+test("projectless operations retain live identity and require approval before reservation", async () => {
+  const op = await fixture(false, null);
+  const loaded = await store.findOperation(companyId, op.id);
+  assert.equal(loaded?.projectId, null);
+  assert.equal(loaded?.metadataPurgedAt, null);
+  assert.equal(loaded?.agentId, agentId);
+  assert.equal(await store.reserve(reservation(op)), false);
+  assert.equal(await store.decide(decision(op)), true);
+  const claim = reservation(op);
+  assert.equal(await store.reserve(claim), true);
+  assert.equal(await store.finish({ ...claim, state: "succeeded", result: null }), true);
+});
 
 test("decision and executor CAS each have one winner with atomic actor/time/audit", async () => {
   const bindingProbe = await database().query<{ identity: string; text_identity: string; structured: unknown; at: string; revision: string }>(

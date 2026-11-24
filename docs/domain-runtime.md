@@ -5,7 +5,13 @@ permitted resources or prepare immutable encrypted requests. They cannot approve
 or directly execute mutations. The separate human `operation-execute` action
 consumes a persisted approval through the existing nonce/CAS reservation.
 
-The host supplies company, agent, run and project identity. Payload identity
+The host supplies company, agent, run and optional project identity. Tasks without
+a project arrive with an empty or null project ID, which the plugin normalizes
+to null. Company, agent and run IDs remain mandatory valid UUIDs; a supplied
+project ID must also be a valid UUID. Projectless operation results cannot be
+read from a project-bound context, or vice versa. Migration 007 allows live
+projectless operations without changing approval or other identity requirements.
+Payload identity
 cannot replace it. Async-local request authority keeps concurrent token contexts
 separate. Before token resolution, after awaited manager/token operations, before
 each Graph attempt and before returning content, the runtime checks the current

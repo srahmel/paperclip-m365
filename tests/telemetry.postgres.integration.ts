@@ -55,7 +55,7 @@ const store = new SqlTelemetryStore(adapter);
 before(async () => {
   await client.unsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
   await client.unsafe(`CREATE SCHEMA "${namespace}"`);
-  for (const name of ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql", "005_private_operation_results.sql", "006_telemetry.sql"]) {
+  for (const name of ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql", "005_private_operation_results.sql", "006_telemetry.sql", "007_projectless_operations.sql"]) {
     const migration = await readFile(resolve(root, "migrations", name), "utf8");
     for (const statement of migration.split(";").map((part) => part.trim()).filter(Boolean)) {
       contract.validatePluginMigrationStatement(statement, namespace); await client.unsafe(statement);

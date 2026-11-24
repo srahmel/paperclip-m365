@@ -158,7 +158,8 @@ export function registerGovernance(input: {
 }
 
 export async function agentIdentity(ctx: PluginContext, context: ToolRunContext): Promise<AgentIdentity> {
-  const identity = { companyId: uuid(context.companyId), agentId: uuid(context.agentId), runId: uuid(context.runId), projectId: uuid(context.projectId) };
+  // The host represents an unassigned project as an empty string.
+  const identity = { companyId: uuid(context.companyId), agentId: uuid(context.agentId), runId: uuid(context.runId), projectId: context.projectId === "" || context.projectId === null ? null : uuid(context.projectId) };
   const agent = await ctx.agents.get(identity.agentId, identity.companyId);
   if (!agent || agent.companyId !== identity.companyId || !["idle", "running"].includes(agent.status)) throw new GovernanceError("agent_unavailable");
   return identity;

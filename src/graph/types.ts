@@ -3,7 +3,7 @@ import type { Json, OperationType } from "../governance/types.js";
 export const JSON_LIMIT = 6 * 1024 * 1024;
 export const FILE_LIMIT = 4 * 1024 * 1024;
 export interface GraphBinding {
-  companyId: string; agentId: string; projectId: string; connectionId: string;
+  companyId: string; agentId: string; projectId: string | null; connectionId: string;
   generation: number; tenantId: string; homeAccountId: string;
 }
 export interface GraphRequest {

@@ -38,7 +38,7 @@ export function validateRequest(request: GraphRequest) {
   }
   const binding = request.binding;
   if (!binding || !Number.isSafeInteger(binding.generation) || binding.generation < 1 ||
-    [binding.companyId, binding.agentId, binding.projectId, binding.connectionId, binding.tenantId, binding.homeAccountId].some((value) => typeof value !== "string" || !value || value.length > 512 || /[\x00-\x1f]/.test(value))) throw new GraphError("request_invalid");
+    [binding.companyId, binding.agentId, ...(binding.projectId === null ? [] : [binding.projectId]), binding.connectionId, binding.tenantId, binding.homeAccountId].some((value) => typeof value !== "string" || !value || value.length > 512 || /[\x00-\x1f]/.test(value))) throw new GraphError("request_invalid");
   const url = new URL(`/v1.0${request.path}`, GRAPH_ORIGIN);
   if (url.pathname !== `/v1.0${request.path}`) throw new GraphError("endpoint_denied");
   for (const [key, value] of Object.entries(request.query ?? {})) {

@@ -90,7 +90,8 @@ export function requireId(value: unknown): asserts value is string {
   if (typeof value !== "string" || value.length < 1 || value.length > 128 || !/^[A-Za-z0-9_.:@-]+$/.test(value)) throw new GovernanceError("identity_invalid");
 }
 export function requireIdentity(identity: AgentIdentity): void {
-  for (const id of [identity.companyId, identity.agentId, identity.runId, identity.projectId]) requireId(id);
+  for (const id of [identity.companyId, identity.agentId, identity.runId]) requireId(id);
+  if (identity.projectId !== null) requireId(identity.projectId);
 }
 export function requireOperationType(value: unknown, read: boolean): asserts value is OperationType {
   if (typeof value !== "string" || !allTypes.has(value) || readOperationTypes.has(value as OperationType) !== read) throw new GovernanceError("operation_type_invalid");

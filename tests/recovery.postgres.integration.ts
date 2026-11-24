@@ -133,13 +133,13 @@ before(async () => {
 });
 after(async () => { await client.unsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`); await client.end({ timeout: 1 }); });
 
-test("version-bound schema004 logical backup upgrades through005/006 without leaking legacy results", async () => {
-  await migrate(["005_private_operation_results.sql", "006_telemetry.sql"]);
+test("version-bound schema004 logical backup upgrades through007 without leaking legacy results", async () => {
+  await migrate(["005_private_operation_results.sql", "006_telemetry.sql", "007_projectless_operations.sql"]);
   const rows = await client.unsafe(`SELECT state,result,private_result_envelope,private_result_expires_at,metadata_purge_after FROM "${namespace}".operations ORDER BY state`);
   assert.equal(rows.length, states.length);
   for (const row of rows) { assert.equal(row.result, null); assert.equal(row.private_result_envelope, null); assert.equal(row.private_result_expires_at, null); assert(row.metadata_purge_after); }
   const telemetry = await client.unsafe(`SELECT COUNT(*) AS count FROM "${namespace}".telemetry_companies`); assert.equal(Number(telemetry[0].count), 0);
-  process.stdout.write(JSON.stringify({ probe: "logical-recovery-upgrade", oldSchemaRevision: oldRevision, currentSourceRevision: currentPackage.sourceRevision, currentPackageSha256: currentPackage.sha256, backupSha256: backupHash, migrations: 6, oldWorkerExecuted: false, physicalBackup: false }) + "\n");
+  process.stdout.write(JSON.stringify({ probe: "logical-recovery-upgrade", oldSchemaRevision: oldRevision, currentSourceRevision: currentPackage.sourceRevision, currentPackageSha256: currentPackage.sha256, backupSha256: backupHash, migrations: 7, oldWorkerExecuted: false, physicalBackup: false }) + "\n");
 });
 
 test("wrong or missing key blocks restored snapshots and cache; matching key decrypts with bound identity", async () => {
@@ -161,7 +161,7 @@ test("matching logical data restore preserves receipts and blocks replay before 
   await restore();
   const restored = await client.unsafe(`SELECT id,state,executor_nonce,snapshot_hash FROM "${namespace}".operations`);
   for (const row of restored) { assert.equal(row.id, ids.get(row.state)); assert.equal(row.executor_nonce, nonces.get(row.state) ?? null); assert.equal(row.snapshot_hash, sha(plaintext.get(row.id)!)); }
-  await migrate(["005_private_operation_results.sql", "006_telemetry.sql"]);
+  await migrate(["005_private_operation_results.sql", "006_telemetry.sql", "007_projectless_operations.sql"]);
   const governance = service();
   for (const state of ["executing", "unknown", "succeeded"]) await assert.rejects(() => governance.execute({ companyId, operationId: ids.get(state)! }), /operation_state_invalid/);
   for (const state of ["pending", "approved"]) {
@@ -196,7 +196,7 @@ test("actual custom pg_dump archive restores schema/data/key bindings without re
   const caches = await client.unsafe(`SELECT cache_algorithm,cache_key_version,cache_iv,cache_ciphertext,cache_authentication_tag FROM "${namespace}".connections WHERE company_id=$1 AND id=$2`, [companyId, connectionId]);
   const cache = caches[0];
   assert.equal(decryptCache({ algorithm: cache.cache_algorithm, keyVersion: cache.cache_key_version, iv: cache.cache_iv, ciphertext: cache.cache_ciphertext, authenticationTag: cache.cache_authentication_tag }, key, companyId, connectionId), "synthetic-encrypted-cache-only");
-  await migrate(["005_private_operation_results.sql", "006_telemetry.sql"]);
+  await migrate(["005_private_operation_results.sql", "006_telemetry.sql", "007_projectless_operations.sql"]);
   const governance = service();
   for (const state of ["executing", "unknown", "succeeded"]) await assert.rejects(() => governance.execute({ companyId, operationId: ids.get(state)! }), /operation_state_invalid/);
   for (const state of ["pending", "approved"]) assert.equal((await governance.invalidate({ companyId, operationId: ids.get(state)!, userId: "synthetic-human" })).state, "invalidated");
