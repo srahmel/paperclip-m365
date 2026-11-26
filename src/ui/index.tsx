@@ -164,11 +164,14 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
       <style>{settingsStyles}</style>
       <header>
       <h2>{t.title}</h2>
-      <p className="m365-hint">{t.setupHint}</p>
+      <p className="m365-hint">{locale.startsWith("de") ? "Verwalte den Zugriff deiner Agenten auf Microsoft-Konten." : "Manage your agents’ access to Microsoft accounts."}</p>
       </header>
+      {context.companyId ? <AccountAccessMatrix key={`matrix:${context.companyId}`} companyId={context.companyId} locale={locale} onSelect={(id) => { setConnectionId(id); void run(() => loadStatus({ connectionId: id })); }} /> : null}
       {loading ? <p>…</p> : null}
       {error || actionError || !context.companyId ? <p role="alert">{t.unavailable}</p> : null}
-      {context.companyId ? <AppSetup key={context.companyId} companyId={context.companyId} locale={locale} onLoaded={setExpectedTenantId} onReady={setAppReady} /> : null}
+      <details><summary>{locale.startsWith("de") ? "Microsoft-App einrichten" : "Microsoft app setup"}</summary>
+      {context.companyId ? <AppSetup key={context.companyId} companyId={context.companyId} locale={locale} onLoaded={setExpectedTenantId} onReady={setAppReady} /> : null}</details>
+      <details open={!!connectionId || !!challenge}><summary>{locale.startsWith("de") ? "Konto verbinden oder erneut anmelden" : "Connect or reconnect an account"}</summary>
       <section className="m365-section" aria-label={t.accountHeading}>
       <h3>{t.accountHeading}</h3>
       <div className="m365-fields">
@@ -194,7 +197,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
       </div>
       <details>
         <summary>{locale.startsWith("de") ? "Ausgewähltes Konto verwalten" : "Manage selected account"}</summary>
-        <p>{locale.startsWith("de") ? "Wähle unten in der Kontenübersicht Verwalten." : "Choose Manage in the account overview below."}</p>
+        <p>{locale.startsWith("de") ? "Wähle oben in der Übersicht Konto öffnen." : "Choose Open account in the overview above."}</p>
         <details><summary>{locale.startsWith("de") ? "Technische Verbindungs-ID" : "Technical connection ID"}</summary>
         <label>{t.connectionId}<input name="m365-connection-id" autoComplete="off" spellCheck={false} aria-describedby="m365-connection-help" value={connectionId} onChange={(event) => setConnectionId(event.target.value)} /><span id="m365-connection-help" className="m365-hint">{t.connectionHelp}</span></label></details>
         <div className="m365-actions">
@@ -212,18 +215,10 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
       ) : null}
       {connection ? <output aria-live="polite">{connection.displayName}: {connection.status}<br />{connection.accountUsername ?? "—"}</output> : null}
       {connection?.errorCode ? <p role="alert">{connectionErrorText(connection.errorCode, locale)}</p> : null}
-      </section>
-      <section className="m365-section" aria-label={t.accessHeading}>
-      <h3>{t.accessHeading}</h3>
-      <p className="m365-hint">{t.accessHelp}</p>
-      {context.companyId && connectionId ? <GovernancePanel
-        key={`${context.companyId}:${connectionId}`}
-        companyId={context.companyId}
-        connectionId={connectionId}
-        locale={locale}
-      /> : null}
-      </section>
-      {context.companyId ? <AccountAccessMatrix key={`matrix:${context.companyId}`} companyId={context.companyId} locale={locale} onSelect={(id) => { setConnectionId(id); void run(() => loadStatus({ connectionId: id })); }} /> : null}
+      </section></details>
+      {context.companyId && connectionId ? <details><summary>{locale.startsWith("de") ? "Aktionsfreigaben und Kontoeinrichtung" : "Action approvals and account setup"}</summary><GovernancePanel
+        key={`${context.companyId}:${connectionId}`} companyId={context.companyId} connectionId={connectionId} locale={locale}
+      /></details> : null}
       <details><summary>{t.technicalHeading}</summary>
         {data ? <dl><dt>Plugin version</dt><dd>{data.version}</dd><dt>Worker status</dt><dd>{data.status}</dd><dt>Microsoft integration</dt><dd>{data.microsoftIntegration}</dd></dl> : null}
         {context.companyId ? <TelemetryPanel key={context.companyId} locale={locale} /> : null}

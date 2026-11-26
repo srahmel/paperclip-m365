@@ -1,6 +1,6 @@
 // Ship styles with the UI module so the host does not need a separate CSS loader.
 export const settingsStyles = `
-.m365-settings { color: var(--foreground, #202020); font: inherit; display: grid; gap: 24px; max-width: 760px; width: 100%; min-width: 0; }
+.m365-settings { color: var(--foreground, #202020); font: inherit; display: grid; gap: 24px; max-width: 1100px; width: 100%; min-width: 0; }
 .m365-settings * { box-sizing: border-box; min-width: 0; }
 .m365-settings h2 { font-size: 20px; font-weight: 600; line-height: 1.4; }
 .m365-settings h3 { font-size: 16px; font-weight: 600; line-height: 1.5; }
@@ -29,7 +29,8 @@ export const settingsStyles = `
 .m365-settings output { display: block; overflow-wrap: anywhere; }
 .m365-settings a { text-decoration: underline; text-underline-offset: 3px; }
 .m365-settings table { border-collapse: collapse; width: 100%; font-size: 14px; }
-.m365-settings :is(th,td) { border: 1px solid var(--border, #aaa); padding: 12px; text-align: left; vertical-align: top; min-width: 180px; max-width: 360px; overflow-wrap: anywhere; }
+.m365-settings :is(th,td) { border: 1px solid var(--border, #aaa); padding: 12px; text-align: left; vertical-align: top; min-width: 240px; max-width: 360px; overflow-wrap: anywhere; }
+.m365-settings th[scope=row], .m365-settings thead th:first-child { min-width: 150px; }
 .m365-settings caption { text-align: left; padding: 12px 0; font-weight: 600; }
 @media (max-width: 520px) { .m365-settings .m365-section { padding: 16px; } .m365-settings .m365-actions > button { width: 100%; } }
 `;

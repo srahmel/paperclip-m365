@@ -1,3 +1,5 @@
+import { changeAccountAccess, type AccountAccess } from "./account-access.js";
+import { operationTypes, type PermissionRule } from "./types.js";
 import type { PluginContext, PluginPerformActionContext, ToolRunContext } from "@paperclipai/plugin-sdk";
 import { GovernanceService, governanceFailureSignal, type GovernanceObserver, type GovernanceExecutor } from "./governance-service.js";
 import { SqlGovernanceStore } from "./sql-governance-store.js";
@@ -12,7 +14,7 @@ const publicErrors = new Set([
   "decision_invalid", "executor_unavailable", "expiry_invalid", "identity_invalid", "input_invalid", "key_unavailable",
   "limit_invalid", "operation_expired", "operation_invalidated", "operation_not_found", "operation_state_invalid",
   "operation_forbidden", "operation_type_invalid", "payload_invalid", "payload_too_large", "permission_denied",
-  "policy_conflict", "policy_invalid", "resource_invalid", "snapshot_mismatch", "snapshot_unavailable", "storage_unavailable",
+  "account_setup_required", "policy_conflict", "policy_invalid", "resource_invalid", "snapshot_mismatch", "snapshot_unavailable", "storage_unavailable",
   "result_invalid", "result_unavailable", "retention_invalid",
 ]);
 function safeCode(error: unknown) {
@@ -81,6 +83,48 @@ export function registerGovernance(input: {
     }
     return service.setPolicy({ companyId: human.companyId, connectionId, expectedRevision: Number(params.expectedRevision),
       bindings: params.bindings as AgentBinding[], approverUserIds: params.approverUserIds as string[], actorId: human.userId });
+  });
+  register("account-access-setup", async (params, context) => {
+    const human = await authorizeHuman(context);
+    const connectionId = uuid(params.connectionId);
+    if (params.workAccountOnly !== true || !Number.isSafeInteger(params.expectedRevision) || Number(params.expectedRevision) < 0) throw new GovernanceError("input_invalid");
+    const current = await service.getPolicy(human.companyId, connectionId);
+    if (current.revision !== params.expectedRevision) throw new GovernanceError("policy_conflict");
+    if (current.status !== "connected" || current.bindings.length) throw new GovernanceError("account_setup_required");
+    if (!/^[a-z_][a-z0-9_]*$/.test(ctx.db.namespace)) throw new GovernanceError("storage_unavailable");
+    // The human explicitly attests this new account contains company data only.
+    // No agent receives access here; assigning an agent is a separate reviewed action.
+    const rules = operationTypes.map(operationType => ({ operationType, resources: ["*"] }));
+    const result = await ctx.db.execute(`UPDATE "${ctx.db.namespace}"."connections"
+      SET account_access_rules=$4::text::jsonb, policy_revision=policy_revision+1,
+        policy_approver_user_ids=$5::text::jsonb, policy_changed_by=$6,policy_changed_at=now()
+      WHERE company_id=$1 AND id=$2 AND policy_revision=$3 AND status='connected'
+        AND account_access_rules='[]'::jsonb AND policy_bindings='[]'::jsonb`,
+      [human.companyId,connectionId,current.revision,JSON.stringify(rules),
+        JSON.stringify(current.approverUserIds.length ? current.approverUserIds : [human.userId]),human.userId]);
+    if (result.rowCount !== 1) throw new GovernanceError("policy_conflict");
+    return service.getPolicy(human.companyId, connectionId);
+  });
+  register("account-access-set", async (params, context) => {
+    const human = await authorizeHuman(context);
+    const connectionId = uuid(params.connectionId);
+    const agentId = uuid(params.agentId);
+    if (typeof params.level !== "string" || !["none", "read", "write"].includes(params.level) ||
+      !Number.isSafeInteger(params.expectedRevision) || Number(params.expectedRevision) < 0) throw new GovernanceError("input_invalid");
+    const current = await service.getPolicy(human.companyId, connectionId);
+    if (current.revision !== params.expectedRevision) throw new GovernanceError("policy_conflict");
+    if (params.level !== "none") {
+      const agent = await ctx.agents.get(agentId, human.companyId);
+      if (!agent || agent.id !== agentId || agent.companyId !== human.companyId || !["idle", "running", "paused"].includes(agent.status)) throw new GovernanceError("agent_unavailable");
+      if (current.status !== "connected") throw new GovernanceError("connection_unavailable");
+    }
+    if (!/^[a-z_][a-z0-9_]*$/.test(ctx.db.namespace)) throw new GovernanceError("storage_unavailable");
+    const rows = await ctx.db.query<{ account_access_rules: PermissionRule[] }>(
+      `SELECT account_access_rules FROM "${ctx.db.namespace}"."connections" WHERE company_id=$1 AND id=$2`, [human.companyId, connectionId]);
+    if (rows.length !== 1) throw new GovernanceError("connection_not_found");
+    const bindings = changeAccountAccess(current.bindings, agentId, rows[0]!.account_access_rules, params.level as AccountAccess);
+    return service.setPolicy({ companyId: human.companyId, connectionId, expectedRevision: current.revision,
+      bindings, approverUserIds: current.approverUserIds, actorId: human.userId });
   });
   register("operation-list", async (_params, context) => {
     const human = await authorizeHuman(context);

@@ -75,7 +75,13 @@ const store = new SqlGovernanceStore(database());
 before(async () => {
   await sql.unsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
   await sql.unsafe(`CREATE SCHEMA "${namespace}"`);
-  for (const migration of ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql", "005_private_operation_results.sql", "006_telemetry.sql", "007_projectless_operations.sql"]) {
+  for (const migration of ["001_scaffold_metadata.sql", "002_auth_connections.sql", "003_atomic_cache_state.sql", "004_governed_operations.sql", "005_private_operation_results.sql", "006_telemetry.sql", "007_projectless_operations.sql", "008_account_access.sql"]) {
+    if (migration === "008_account_access.sql") {
+      await sql.unsafe(`INSERT INTO "${namespace}".connections
+        (company_id,id,display_name,expected_tenant_id,status,created_at,updated_at,policy_bindings)
+        VALUES($1,$2,'Synthetic upgrade',$2,'pending',now(),now(),$3::jsonb)`,
+        [companyId,agentId,JSON.stringify([{agentId,rules:[{operationType:"mail-get-message",resources:["work-only"]}]}])]);
+    }
     const contents = await readFile(resolve(root, "migrations", migration), "utf8");
     for (const statement of contents.split(";").map((part) => part.trim()).filter(Boolean)) {
       contract.validatePluginMigrationStatement(statement, namespace);
@@ -111,6 +117,17 @@ async function fixture(shareable = false, projectId: string | null = randomUUID(
 }
 const decision = (operation: OperationRecord) => ({ companyId: operation.companyId,operationId: operation.id,snapshotHash: operation.snapshotHash,userId,approve: true,correlationId: randomUUID() });
 const reservation = (operation: OperationRecord) => ({ companyId: operation.companyId,operationId: operation.id,snapshotHash: operation.snapshotHash,executorNonce: randomUUID(),correlationId: randomUUID() });
+
+test("account profile migration preserves grants and exclusions, including after all agents are revoked", async () => {
+  const [before] = await sql.unsafe(`SELECT policy_bindings,account_access_rules FROM "${namespace}".connections WHERE company_id=$1 AND id=$2`, [companyId,agentId]);
+  assert.deepEqual(before.account_access_rules, [{operationType:"mail-get-message",resources:["work-only"]}]);
+  assert.equal(before.policy_bindings[0].agentId,agentId);
+  await sql.unsafe(`UPDATE "${namespace}".connections SET policy_bindings='[]'::jsonb,error_code='account_mismatch' WHERE company_id=$1 AND id=$2`,[companyId,agentId]);
+  const [after] = await sql.unsafe(`SELECT policy_bindings,account_access_rules,error_code FROM "${namespace}".connections WHERE company_id=$1 AND id=$2`,[companyId,agentId]);
+  assert.deepEqual(after.account_access_rules,before.account_access_rules);
+  assert.deepEqual(after.policy_bindings,[]);
+  assert.equal(after.error_code,"account_mismatch");
+});
 
 test("projectless operations retain live identity and require approval before reservation", async () => {
   const op = await fixture(false, null);

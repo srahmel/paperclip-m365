@@ -94,7 +94,7 @@ function ScopedGovernancePanel({ companyId, connectionId, locale }: { companyId:
     {error ? <p role="alert">{t.error}</p> : null}
     {busy ? <p role="status">{t.busy}</p> : null}
     {notice ? <p role="status">{notice}</p> : null}
-    <fieldset disabled={busy} style={{ display: "grid", gap: "0.75rem" }}>
+    <details><summary>{locale.startsWith("de") ? "Technische Kontokonfiguration" : "Technical account configuration"}</summary><fieldset disabled={busy} style={{ display: "grid", gap: "0.75rem" }}>
       <legend>{t.policy}</legend>
       <button type="button" onClick={() => run(async () => {
         const [next, directory] = await Promise.all([getPolicy({ connectionId }), loadDirectory({})]);
@@ -123,6 +123,7 @@ function ScopedGovernancePanel({ companyId, connectionId, locale }: { companyId:
         <button type="button" disabled={incomplete || (wholeAccount && !acknowledged)} onClick={() => run(async () => await setPolicy({ connectionId, expectedRevision: policy.revision, ...buildPolicy(rows, approvers, acknowledged) }) as ConnectionPolicy, (next) => { acceptPolicy(next); setOperations(null); setNotice(t.saved); })}>{t.save}</button>
       </>}
     </fieldset>
+    </details>
     <h4>{t.requests}</h4>
     <p>{t.bounded}</p>
     <button type="button" disabled={busy} onClick={() => run(async () => await listOperations({}) as PublicOperation[], (next) => {

@@ -154,12 +154,15 @@ Microsoft consent and an installed plugin do not automatically grant agent acces
 Both the host's effective tool access and the plugin connection policy must allow
 the agent's requested operation and resources.
 
-Under **Set up agent access / Permissions and approvals**, load the current policy,
-add the intended agent IDs, operations and exact allowed resource IDs, and save.
-Use actual folder, calendar and drive/item IDs, not translated display names.
-Preserve existing policy rows and designate the human approver for write requests.
-Check the agent's host access profiles for the matching plugin tools. See
-[permissions and approvals](wp03-governed-operations.md) for the policy contract.
+In **Who can access each account?**, find the named agent and account, choose
+**Read only** or **Read and write**, then review and save the change. The matrix
+loads automatically and can be refreshed. Existing restricted grants are preserved
+until explicitly changed. For a new work-only account, complete **Set up account
+access** first. See [Assign account access](#assign-account-access) below.
+
+Check the agent's host access profiles for the matching plugin tools. Concrete
+write requests still require human approval. See [permissions and approvals](wp03-governed-operations.md)
+for the underlying policy contract.
 
 Provide the agent with its connection ID and authorized resource IDs. Never put
 tokens, passwords or encryption key values in agent instructions.
@@ -198,37 +201,51 @@ existing account. Approval remains necessary for concrete Microsoft mutations.
   Microsoft account. A different account now fails with `account_mismatch`, so
   existing grants cannot silently transfer to another user.
 
-### Inspect the account/agent matrix
+### Assign account access
 
-Open **Accounts and agent access > Load access matrix** in plugin settings.
-Rows identify agents by name; account columns show the saved sign-in address,
-display name and status. Tenant and connection IDs are available under
-**Technical details**. The permissions editor selects agents by name and shows
-readable action labels; IDs remain the internal policy keys. Expand a cell
-to inspect the exact allowed operations and folder/calendar/drive resource IDs.
-**No grant** means no connection-policy grant for that agent. **Manage** selects
-the connection in the existing permissions editor; loading the matrix changes
-no grants and makes no Microsoft requests.
+Open **Who can access each account? > Load / refresh accounts** in plugin settings.
+Each row is an agent name and each column is a Microsoft account, identified by
+its display name and saved sign-in address. Choose **No access**, **Read only**,
+or **Read and write**, review the named agent/account, then **Save account access**.
+Cancel leaves all permissions unchanged. No technical IDs or per-service switches
+are required for this assignment workflow.
 
-The matrix is a current read of saved plugin connection policies, not a claim
-that all displayed grants are presently executable. Effective access also needs
-host tool permission, an eligible agent, a connected account and Microsoft consent.
-Writes still need human approval. An explicitly marked limit applies beyond 100
-connections or 100 listed agents; unresolved policy agent IDs stay visible.
+The levels apply to the account's configured access boundaries. Migration 008
+preserves the union of previously approved operations/resources as an independent
+account envelope without changing any agent grants. Read-only omits mutations;
+read-and-write uses the envelope, including only its configured mutations.
+Neither profile invents resources or widens the account's envelope. Existing grants
+that do not exactly match a profile display **Restricted** until explicitly changed.
+An account's envelope survives removing its last agent. Other agents and human
+approvers remain unchanged. Revision checks reject stale changes.
 
-The sign-in username is persisted as `account_username`. Stable account binding
-uses tenant ID plus MSAL `homeAccountId`; username changes on the same account
-are allowed. The username can differ from the primary SMTP address and does not
-enumerate aliases. This version does not discover aliases or shared mailboxes.
+For a newly connected, unassigned account, **Set up account access** offers an
+account-wide setup only after the administrator confirms it contains company data
+only, with no private or Liberty content. Setup grants no agent access; assignments
+are separate. The acting authorized administrator becomes the initial approver if
+none exists. For mixed-content accounts, exclusions must be established first;
+account-wide setup is deliberately not a substitute for those restrictions.
+Existing restricted envelopes cannot be overwritten by this setup action.
 
-### Remaining name-resolution limitations
+Host tool permission, agent status, Microsoft consent and provisioning still limit
+what can execute. The page does not claim to have verified each service's consent.
+Writes require approval for the specific action. Teams is not implemented.
+The matrix is bounded to 100 accounts and 100 listed agents and explicitly reports
+truncation; unresolved existing assignments remain visible and revocable.
 
-The SDK membership API exposes approver IDs but no human names or email addresses.
-Existing approver assignments are preserved; their editor is under **Advanced
-approval configuration** until a supported user-directory extension is available.
-Resource selection still requires exact folder/calendar/drive IDs. A resource
-picker backed by authenticated, company-scoped discovery is still needed; do not
-invent friendly names or silently replace a resource with account-wide access.
+**Open account** selects the account for reconnecting and reviewing action approvals.
+The previous technical policy editor remains available for specialized setup under
+**Action approvals and account setup > Technical account configuration**. It edits
+individual grants, not the preserved account envelope. Changing an existing envelope
+requires a separate reviewed configuration change; it is not inferred from ordinary
+agent revocations. Resource discovery for mixed-content setup and human approver
+name resolution remain limitations of that technical setup path.
+
+The username is persisted as `account_username`. Stable identity uses tenant ID
+plus MSAL `homeAccountId`; username changes on the same account are allowed. The
+sign-in name is not a verified directory of primary SMTP addresses, aliases or
+shared mailboxes. A different account cannot inherit the original connection's
+grants by reconnecting.
 
 ## Troubleshooting checklist
 

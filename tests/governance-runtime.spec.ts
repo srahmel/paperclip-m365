@@ -50,6 +50,35 @@ async function setup() {
 }
 
 describe("governance human runtime boundary", () => {
+  it("requires an explicit work-only attestation to initialize an unassigned account", async () => {
+    const { harness, service } = await setup();
+    service.getPolicy.mockResolvedValue({ ...policy, bindings: [], approverUserIds: [] });
+    const execute = vi.spyOn(harness.ctx.db, "execute").mockResolvedValue({rowCount:1});
+    await expect(harness.performAction("account-access-setup", {connectionId,expectedRevision:1},human)).rejects.toThrow();
+    await harness.performAction("account-access-setup", {connectionId,expectedRevision:1,workAccountOnly:true,userId:"spoofed",companyId:foreignCompanyId},human);
+    const call = execute.mock.calls.find(([sql]) => sql.includes("SET account_access_rules"));
+    expect(call?.[1]?.slice(0,3)).toEqual([companyId,connectionId,1]);
+    expect(call?.[1]?.slice(4)).toEqual([JSON.stringify([userId]),userId]);
+    expect(call?.[0]).toContain("policy_bindings='[]'::jsonb");
+    expect(call?.[0]).toContain("account_access_rules='[]'::jsonb");
+    expect(service.setPolicy).not.toHaveBeenCalled();
+    service.getPolicy.mockResolvedValue(policy);
+    await expect(harness.performAction("account-access-setup", {connectionId,expectedRevision:1,workAccountOnly:true},human)).rejects.toThrow("account_setup_required");
+  });
+  it("sets account access only for the host company and authenticated human", async () => {
+    const { harness, service } = await setup();
+    vi.spyOn(harness.ctx.db, "query").mockResolvedValue([{ account_access_rules: policy.bindings[0]!.rules }]);
+    await harness.performAction("account-access-set", { connectionId, agentId, expectedRevision: 1, level: "read", companyId: foreignCompanyId, userId: "spoofed" }, human);
+    expect(service.setPolicy).toHaveBeenCalledExactlyOnceWith({ companyId, connectionId, expectedRevision: 1,
+      bindings: policy.bindings, approverUserIds: policy.approverUserIds, actorId: userId });
+    service.setPolicy.mockClear();
+    for (const level of ["admin", ["read"], null]) {
+      await expect(harness.performAction("account-access-set", { connectionId, agentId, expectedRevision: 1, level }, human)).rejects.toThrow();
+    }
+    await expect(harness.performAction("account-access-set", { connectionId, agentId, expectedRevision: 0, level: "none" }, human)).rejects.toThrow("policy_conflict");
+    await expect(harness.performAction("account-access-set", { connectionId, agentId, expectedRevision: 1, level: "read" }, {companyId, actor:{type:"agent",agentId}})).rejects.toThrow();
+    expect(service.setPolicy).not.toHaveBeenCalled();
+  });
   it("accepts the host's projectless context for connection status and rejects malformed identities", async () => {
     const { harness, service } = await setup();
     expect(await harness.executeTool("connection-get-status", { connectionId }, { ...identity, projectId: "" }))
