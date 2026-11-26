@@ -4,6 +4,10 @@ Package name: `paperclip-plugin-m365`
 
 Plugin ID: `srahmel.m365`
 
+Start with the [step-by-step setup guide](docs/setup.md), including Entra app
+registration, device-code sign-in, agent access and verification. This plugin
+requires no callback URL or Entra client secret.
+
 The development package implements Mail, Calendar and OneDrive domain tools,
 agent permissions, immutable human approvals and separately reserved execution.
 Authentication uses an MSAL provider,
