@@ -21,13 +21,14 @@ import { registerTelemetry } from "./telemetry/runtime.js";
 import type { SignalEvent } from "./telemetry/types.js";
 import { DomainRuntime } from "./domains/runtime.js";
 import { createDomainModules } from "./domains/index.js";
+import { loadAccessMatrix } from "./auth/access-matrix.js";
 
 const PUBLIC_ACTION_ERRORS = new Set([
   "authenticated_human_required", "connection_management_forbidden", "authorization_unavailable",
   "connection_id_invalid", "tenant_id_invalid", "display_name_invalid", "operation_id_invalid",
   "connection_not_found", "connection_unavailable", "operation_invalidated", "cache_conflict",
   "cache_invalid", "consent_revoked", "interaction_required", "key_unavailable", "tenant_mismatch",
-  "provider_unavailable", "storage_unavailable", "authentication_shutdown",
+  "provider_unavailable", "storage_unavailable", "authentication_shutdown", "account_mismatch",
   "authentication_session_not_found", "authentication_session_capacity",
 ]);
 
@@ -119,6 +120,11 @@ export function createM365Plugin(
         const { companyId } = await requireConnectionManager(ctx, actionContext);
         const connectionId = requireUuid(params.connectionId, "connection_id_invalid");
         return publicConnection(await (await resolveManager(ctx, companyId)).getStatus(companyId, connectionId));
+      });
+
+      registerAction("access-matrix", async (_params, actionContext) => {
+        const { companyId } = await requireConnectionManager(ctx, actionContext);
+        return loadAccessMatrix(ctx, companyId);
       });
 
       registerAction("start-sign-in", async (params, actionContext) => {

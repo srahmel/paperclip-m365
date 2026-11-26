@@ -16,7 +16,8 @@ export type ConnectionErrorCode =
   | "storage_unavailable"
   | "provider_unavailable"
   | "key_unavailable"
-  | "tenant_mismatch";
+  | "tenant_mismatch"
+  | "account_mismatch";
 
 export interface MicrosoftAccount {
   homeAccountId: string;
@@ -190,9 +191,8 @@ export class ConnectionManager {
     if (!connection) throw new ConnectionAccessError("connection_not_found");
     await this.#store.disconnect(companyId, connectionId, this.#now().toISOString());
     connection.generation += 1;
-    connection.tenantId = null;
-    connection.homeAccountId = null;
-    connection.accountUsername = null;
+    // Retain the account binding across reauthentication: existing agent grants
+    // must never silently transfer to a different user in the same tenant.
     connection.status = "pending";
     connection.errorCode = null;
     connection.updatedAt = this.#now().toISOString();
@@ -264,6 +264,11 @@ export class ConnectionManager {
       throw new ConnectionAccessError("tenant_mismatch");
     }
 
+    if (connection.homeAccountId && (result.account.homeAccountId !== connection.homeAccountId ||
+      result.account.tenantId !== connection.tenantId)) {
+      await this.#block(connection, "account_mismatch");
+      throw new ConnectionAccessError("account_mismatch");
+    }
     const envelope = encryptCache(result.serializedCache, key, connection.companyId, connection.id);
     const cacheVersion = await this.#store.compareAndSwapCache(
       connection.companyId,

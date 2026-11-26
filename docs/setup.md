@@ -176,6 +176,49 @@ Missing tools require host access configuration; resource denial requires checki
 the explicit connection policy. `interaction_required` requires reconnecting the
 existing account. Approval remains necessary for concrete Microsoft mutations.
 
+## Multiple domains, users and agent access
+
+- Several verified email domains inside one Entra tenant do not require separate
+  app registrations. Connect each distinct work account separately using that
+  tenant ID and the configured client ID. A mail alias is not another account.
+- For accounts in different Entra tenants, the one configured application must
+  support organizational multitenant sign-in and have consent in each target
+  tenant. Enter the target tenant ID for each new connection. See Microsoft's
+  [single- and multitenant application guidance](https://learn.microsoft.com/en-us/entra/identity-platform/single-and-multi-tenant-apps).
+- The plugin currently has one client ID and scope configuration per Paperclip
+  company, not a separate client ID per connection. Different single-tenant app
+  registrations therefore require separate Paperclip company configurations;
+  do not overwrite the client ID of an existing company to switch between apps.
+- Each connection has its own tenant, account identity, encrypted token cache
+  and agent policy. Select shared use when multiple agents need that connection;
+  this does not make it an Exchange shared-mailbox connection.
+- Use **Prepare new account** after managing an existing connection, then enter
+  the new display name/tenant and start sign-in. Confirm the actual signed-in
+  username before granting agents access. Use **Sign in again** only for the same
+  Microsoft account. A different account now fails with `account_mismatch`, so
+  existing grants cannot silently transfer to another user.
+
+### Inspect the account/agent matrix
+
+Open **Accounts and agent access > Load access matrix** in plugin settings.
+Rows identify agents; each column identifies a stored connection by username,
+display name, tenant, connection ID, status and policy revision. Expand a cell
+to inspect the exact allowed operations and folder/calendar/drive resource IDs.
+**No grant** means no connection-policy grant for that agent. **Manage** selects
+the connection in the existing permissions editor; loading the matrix changes
+no grants and makes no Microsoft requests.
+
+The matrix is a current read of saved plugin connection policies, not a claim
+that all displayed grants are presently executable. Effective access also needs
+host tool permission, an eligible agent, a connected account and Microsoft consent.
+Writes still need human approval. An explicitly marked limit applies beyond 100
+connections or 100 listed agents; unresolved policy agent IDs stay visible.
+
+The sign-in username is persisted as `account_username`. Stable account binding
+uses tenant ID plus MSAL `homeAccountId`; username changes on the same account
+are allowed. The username can differ from the primary SMTP address and does not
+enumerate aliases. This version does not discover aliases or shared mailboxes.
+
 ## Troubleshooting checklist
 
 | Symptom | Check |

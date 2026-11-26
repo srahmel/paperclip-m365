@@ -10,6 +10,28 @@ import { SqlConnectionStore } from "../src/auth/sql-connection-store.js";
 import { MsalDeviceCodeProvider } from "../src/auth/msal-provider.js";
 
 describe("M365 plugin scaffold", () => {
+  it("restricts the account matrix to authorized humans and host company, projecting no secrets", async () => {
+    const harness = createTestHarness({ manifest }); seedConnectionManagers(harness);
+    const companyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const query = vi.spyOn(harness.ctx.db, "query").mockResolvedValue([{
+      id: "connection-a", display_name: "Work", account_username: "alice@example.test",
+      expected_tenant_id: "tenant-a", status: "connected", shareable: true,
+      policy_revision: 2, policy_bindings: [{ agentId: "agent-a", rules: [{ operationType: "mail-get-message", resources: ["folder-a"] }] }],
+      cache_ciphertext: "private-cache-canary", home_account_id: "private-account-canary",
+    }]);
+    const agents = vi.spyOn(harness.ctx.agents, "list").mockResolvedValue([]);
+    await createM365Plugin().definition.setup(harness.ctx);
+    await expect(harness.performAction("access-matrix", {}, { companyId, actor: { type: "agent", agentId: "agent-a" } })).rejects.toThrow();
+    await expect(harness.performAction("access-matrix", {}, { companyId, actor: { type: "user", userId: "outsider" } })).rejects.toThrow();
+    expect(query.mock.calls.some(([sql]) => sql.includes("account_username"))).toBe(false);
+    expect(agents).not.toHaveBeenCalled(); query.mockClear();
+    const result = await harness.performAction("access-matrix", { companyId: "foreign-company" }, { companyId, actor: { type: "user", userId: "user-a" } });
+    expect(result).toMatchObject({ connections: [{ username: "alice@example.test", bindings: [{ agentId: "agent-a" }] }], truncated: false });
+    expect(query.mock.calls[0]?.[1]).toEqual([companyId]);
+    expect(query.mock.calls[0]?.[0]).not.toMatch(/SELECT \*|cache_ciphertext|home_account_id/);
+    expect(JSON.stringify(result)).not.toContain("private-");
+    expect(agents).toHaveBeenCalledWith({ companyId, limit: 101, offset: 0 });
+  });
   it.each([["provider_unavailable", "provider"], ["consent_revoked", "token"], ["cache_invalid", "token"]])("classifies synchronous %s without private provider data", async (code, errorClass) => {
     const observed = vi.spyOn(TelemetryService.prototype, "observe").mockResolvedValue(undefined);
     const sessions = new AuthenticationSessionRegistry();

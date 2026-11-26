@@ -11,6 +11,7 @@ import { TelemetryPanel } from "./telemetry-panel.js";
 import { settingsStyles } from "./settings-styles.js";
 import { AppSetup } from "./app-setup.js";
 import { connectionErrorText } from "./connection-status.js";
+import { AccountAccessMatrix } from "./access-matrix.js";
 
 type ScaffoldStatus = {
   status: "ready";
@@ -179,6 +180,11 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         {t.shareable}
       </label>
       <div className="m365-actions">
+        {connectionId ? <button type="button" onClick={() => {
+          actionEpoch.invalidate(); authenticationPoller.stop(); setAuthenticationSession(null);
+          setChallenge(null); setConnection(null); setConnectionId(""); setDisplayName("");
+          setShareable(false); setActionError(false);
+        }}>{locale.toLowerCase().startsWith("de") ? "Neues Konto vorbereiten" : "Prepare new account"}</button> : null}
         <button className="m365-primary" disabled={!appReady} type="button" onClick={() => begin(() => startSignIn(buildStartSignInParams({
           connectionId,
           expectedTenantId,
@@ -202,7 +208,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
           <output>{challenge.userCode}</output>
         </section>
       ) : null}
-      {connection ? <output aria-live="polite">{connection.displayName}: {connection.status}</output> : null}
+      {connection ? <output aria-live="polite">{connection.displayName}: {connection.status}<br />{connection.accountUsername ?? "—"}<br />{connection.tenantId ?? "—"}</output> : null}
       {connection?.errorCode ? <p role="alert">{connectionErrorText(connection.errorCode, locale)}</p> : null}
       </section>
       <section className="m365-section" aria-label={t.accessHeading}>
@@ -215,6 +221,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         locale={locale}
       /> : null}
       </section>
+      {context.companyId ? <AccountAccessMatrix key={`matrix:${context.companyId}`} companyId={context.companyId} locale={locale} onSelect={(id) => { setConnectionId(id); void run(() => loadStatus({ connectionId: id })); }} /> : null}
       <details><summary>{t.technicalHeading}</summary>
         {data ? <dl><dt>Plugin version</dt><dd>{data.version}</dd><dt>Worker status</dt><dd>{data.status}</dd><dt>Microsoft integration</dt><dd>{data.microsoftIntegration}</dd></dl> : null}
         {context.companyId ? <TelemetryPanel key={context.companyId} locale={locale} /> : null}

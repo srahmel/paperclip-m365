@@ -570,6 +570,22 @@ describe("ConnectionManager", () => {
     expect(store.caches.size).toBe(0);
   });
 
+  it("pins reauthentication to the original account while allowing its username to change", async () => {
+    const store = new MemoryConnectionStore();
+    let account = { homeAccountId: "account-a", tenantId: "tenant-a", username: "a@example.test" };
+    const manager = new ConnectionManager({ store,
+      provider: { signIn: async () => ({ account: { ...account }, serializedCache: "synthetic-cache" }), acquireToken: async () => { throw new Error("unused"); } },
+      resolveCacheKey: async () => ({ value: Buffer.alloc(32, 7).toString("base64"), version: "test" }),
+    });
+    await manager.createAndSignIn({ companyId: "company-a", connectionId: "connection-a", expectedTenantId: "tenant-a", displayName: "Alice", shareable: true });
+    account = { ...account, homeAccountId: "account-b", username: "b@example.test" };
+    await expect(manager.reactivateAndSignIn("company-a", "connection-a")).rejects.toThrow("account_mismatch");
+    expect(await manager.getStatus("company-a", "connection-a")).toMatchObject({ status: "blocked", homeAccountId: "account-a", accountUsername: "a@example.test" });
+    expect(store.caches.size).toBe(0);
+    account = { ...account, homeAccountId: "account-a", username: "renamed@example.test" };
+    await expect(manager.reactivateAndSignIn("company-a", "connection-a")).resolves.toMatchObject({ status: "connected", homeAccountId: "account-a", accountUsername: "renamed@example.test" });
+  });
+
   it("blocks activation when Microsoft returns a foreign tenant", async () => {
     const store = new MemoryConnectionStore();
     const manager = new ConnectionManager({

@@ -28,5 +28,8 @@ export const settingsStyles = `
 .m365-settings [role=alert] { padding: 12px 16px; border: 1px solid var(--destructive, #b82020); border-radius: 6px; }
 .m365-settings output { display: block; overflow-wrap: anywhere; }
 .m365-settings a { text-decoration: underline; text-underline-offset: 3px; }
+.m365-settings table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.m365-settings :is(th,td) { border: 1px solid var(--border, #aaa); padding: 12px; text-align: left; vertical-align: top; min-width: 180px; max-width: 360px; overflow-wrap: anywhere; }
+.m365-settings caption { text-align: left; padding: 12px 0; font-weight: 600; }
 @media (max-width: 520px) { .m365-settings .m365-section { padding: 16px; } .m365-settings .m365-actions > button { width: 100%; } }
 `;

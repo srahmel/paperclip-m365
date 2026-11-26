@@ -1,6 +1,7 @@
 import { resolveLocale } from "../auth/localization.js";
 
 const errors = {
+  account_mismatch: ["Sign in with the original Microsoft account. Use a new connection and separate grants for a different user.", "Melde dich mit dem ursprünglichen Microsoft-Konto an. Verwende für einen anderen Benutzer eine neue Verbindung mit eigenen Freigaben."],
   key_unavailable: ["The cache encryption key is unavailable. Check the configured secret reference.", "Der Cache-Schlüssel ist nicht verfügbar. Prüfe die konfigurierte Secret-Referenz."],
   provider_unavailable: ["Microsoft sign-in could not be completed. Check the app registration and try signing in again.", "Die Microsoft-Anmeldung konnte nicht abgeschlossen werden. Prüfe die App-Registrierung und melde dich erneut an."],
   tenant_mismatch: ["The signed-in account belongs to a different Microsoft tenant.", "Das angemeldete Konto gehört zu einem anderen Microsoft-Tenant."],
