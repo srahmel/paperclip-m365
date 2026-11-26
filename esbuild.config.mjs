@@ -8,7 +8,9 @@ await Promise.all([
   esbuild.build(distribution(presets.esbuild.manifest)),
   esbuild.build(distribution({
     ...presets.esbuild.worker,
-    external: [...presets.esbuild.worker.external, "@azure/msal-node"],
+    banner: {
+      js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
+    },
   })),
   esbuild.build(distribution(presets.esbuild.ui)),
   esbuild.build({ entryPoints: ["src/telemetry/watchdog.ts"], outfile: "dist/watchdog.js", platform: "node", format: "esm", bundle: true, sourcemap: false, target: "node24" }),
