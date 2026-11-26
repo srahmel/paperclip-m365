@@ -201,8 +201,10 @@ existing account. Approval remains necessary for concrete Microsoft mutations.
 ### Inspect the account/agent matrix
 
 Open **Accounts and agent access > Load access matrix** in plugin settings.
-Rows identify agents; each column identifies a stored connection by username,
-display name, tenant, connection ID, status and policy revision. Expand a cell
+Rows identify agents by name; account columns show the saved sign-in address,
+display name and status. Tenant and connection IDs are available under
+**Technical details**. The permissions editor selects agents by name and shows
+readable action labels; IDs remain the internal policy keys. Expand a cell
 to inspect the exact allowed operations and folder/calendar/drive resource IDs.
 **No grant** means no connection-policy grant for that agent. **Manage** selects
 the connection in the existing permissions editor; loading the matrix changes
@@ -218,6 +220,15 @@ The sign-in username is persisted as `account_username`. Stable account binding
 uses tenant ID plus MSAL `homeAccountId`; username changes on the same account
 are allowed. The username can differ from the primary SMTP address and does not
 enumerate aliases. This version does not discover aliases or shared mailboxes.
+
+### Remaining name-resolution limitations
+
+The SDK membership API exposes approver IDs but no human names or email addresses.
+Existing approver assignments are preserved; their editor is under **Advanced
+approval configuration** until a supported user-directory extension is available.
+Resource selection still requires exact folder/calendar/drive IDs. A resource
+picker backed by authenticated, company-scoped discovery is still needed; do not
+invent friendly names or silently replace a resource with account-wide access.
 
 ## Troubleshooting checklist
 

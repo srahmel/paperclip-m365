@@ -1,15 +1,17 @@
+import { permissionLabel } from "./permission-labels.js";
 import { useEffect, useRef, useState } from "react";
 import { usePluginAction } from "@paperclipai/plugin-sdk/ui";
 import { operationTypes, type ConnectionPolicy } from "../governance/types.js";
 import { buildPolicy, GovernanceRequests, lines, policyRows, PreviewExpiry, previewIsCurrent, type OperationPreview, type PolicyRow, type PublicOperation } from "./governance-model.js";
 
+import type { AccessMatrix } from "../auth/access-matrix.js";
 import { OperationPreviewContent } from "./operation-preview.js";
 import { buildOperationPreview, canExecute, scopedOperation, type PreviewModel } from "./operation-preview-model.js";
 
 const copy = {
   en: {
     title: "Permissions and approvals", policy: "Connection permissions", load: "Load permissions", save: "Save permissions", add: "Add permission", remove: "Remove permission",
-    agent: "Agent ID", type: "Operation", resources: "Allowed resource IDs (one per line)", approvers: "Approver user IDs (one per line)",
+    agent: "Agent", type: "Operation", resources: "Allowed resource IDs (one per line)", approvers: "Approver user IDs (one per line)",
     wildcard: "* grants this operation across the entire account. Use specific resource IDs whenever possible.", acknowledge: "I authorize the listed operations for the entire account where * is entered.",
     error: "The action could not be completed. Reload the current state before trying again.", saved: "Permissions saved.", revision: "Revision", emptyPolicy: "No agent permissions. Agents cannot use this connection.",
     requests: "Operation requests", refresh: "Refresh requests", bounded: "Shows up to 100 recent requests for this company, filtered to this connection.", empty: "No requests shown for this connection.",
@@ -19,7 +21,7 @@ const copy = {
   },
   de: {
     title: "Berechtigungen und Freigaben", policy: "Verbindungsberechtigungen", load: "Berechtigungen laden", save: "Berechtigungen speichern", add: "Berechtigung hinzufügen", remove: "Berechtigung entfernen",
-    agent: "Agenten-ID", type: "Aktion", resources: "Erlaubte Ressourcen-IDs (eine pro Zeile)", approvers: "Benutzer-IDs der Freigebenden (eine pro Zeile)",
+    agent: "Agent", type: "Aktion", resources: "Erlaubte Ressourcen-IDs (eine pro Zeile)", approvers: "Benutzer-IDs der Freigebenden (eine pro Zeile)",
     wildcard: "* erlaubt diese Aktion für das gesamte Konto. Verwende möglichst konkrete Ressourcen-IDs.", acknowledge: "Ich erlaube die aufgeführten Aktionen mit * für das gesamte Konto.",
     error: "Die Aktion konnte nicht abgeschlossen werden. Lade den aktuellen Stand vor einem erneuten Versuch.", saved: "Berechtigungen gespeichert.", revision: "Revision", emptyPolicy: "Keine Agentenberechtigungen. Agenten können diese Verbindung nicht verwenden.",
     requests: "Aktionsanfragen", refresh: "Anfragen aktualisieren", bounded: "Zeigt bis zu 100 aktuelle Anfragen des Unternehmens, gefiltert auf diese Verbindung.", empty: "Keine Anfragen für diese Verbindung angezeigt.",
@@ -34,6 +36,8 @@ export function GovernancePanel(props: { companyId: string; connectionId: string
 }
 function ScopedGovernancePanel({ companyId, connectionId, locale }: { companyId: string; connectionId: string; locale: string }) {
   const t = copy[locale.toLowerCase().startsWith("de") ? "de" : "en"];
+  const loadDirectory = usePluginAction("access-matrix");
+  const [agents, setAgents] = useState<AccessMatrix["agents"]>([]);
   const getPolicy = usePluginAction("policy-get");
   const setPolicy = usePluginAction("policy-set");
   const listOperations = usePluginAction("operation-list");
@@ -92,21 +96,28 @@ function ScopedGovernancePanel({ companyId, connectionId, locale }: { companyId:
     {notice ? <p role="status">{notice}</p> : null}
     <fieldset disabled={busy} style={{ display: "grid", gap: "0.75rem" }}>
       <legend>{t.policy}</legend>
-      <button type="button" onClick={() => run(async () => await getPolicy({ connectionId }) as ConnectionPolicy, acceptPolicy)}>{t.load}</button>
+      <button type="button" onClick={() => run(async () => {
+        const [next, directory] = await Promise.all([getPolicy({ connectionId }), loadDirectory({})]);
+        return { next: next as ConnectionPolicy, directory: directory as AccessMatrix };
+      }, ({ next, directory }) => { setAgents(directory.agents); acceptPolicy(next); })}>{t.load}</button>
       {!policy ? <p>{t.loadingPolicy}</p> : <>
         <p>{t.revision}: {policy.revision}</p>
         {rows.length === 0 ? <p>{t.emptyPolicy}</p> : null}
         {rows.map((row, index) => <fieldset key={index} style={{ display: "grid", gap: "0.5rem" }}>
           <legend>{index + 1}</legend>
-          <label>{t.agent}<input value={row.agentId} onChange={(event) => changeRow(index, { agentId: event.target.value })} /></label>
+          <label>{t.agent}<select value={row.agentId} onChange={(event) => changeRow(index, { agentId: event.target.value })}>
+            <option value="">{locale.startsWith("de") ? "Agent auswählen" : "Choose an agent"}</option>
+            {row.agentId && !agents.some(agent => agent.id === row.agentId) ? <option value={row.agentId}>{locale.startsWith("de") ? "Bisheriger Agent (Name nicht verfügbar)" : "Existing agent (name unavailable)"}</option> : null}
+            {agents.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+          </select></label>
           <label>{t.type}<select value={row.operationType} onChange={(event) => changeRow(index, { operationType: event.target.value as PolicyRow["operationType"] })}>
-            {operationTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+            {operationTypes.map((type) => <option key={type} value={type}>{permissionLabel(type, locale)}</option>)}
           </select></label>
           <label>{t.resources}<textarea rows={3} value={row.resources} onChange={(event) => changeRow(index, { resources: event.target.value })} /></label>
           <button type="button" onClick={() => { setRows(rows.filter((_, position) => position !== index)); setAcknowledged(false); }}>{t.remove}</button>
         </fieldset>)}
         <button type="button" onClick={() => { setRows([...rows, { agentId: "", operationType: "mail-list-folders", resources: "" }]); setAcknowledged(false); }}>{t.add}</button>
-        <label>{t.approvers}<textarea rows={3} value={approvers} onChange={(event) => { setApprovers(event.target.value); setNotice(""); }} /></label>
+        <details><summary>{locale.startsWith("de") ? "Erweiterte Freigabe-Konfiguration" : "Advanced approval configuration"}</summary><p>{locale.startsWith("de") ? "Paperclip stellt dem Plugin derzeit keine Namen der freigebenden Benutzer bereit. Bestehende Freigebende bleiben unverändert." : "Paperclip does not currently expose approver names to this plugin. Existing approvers are preserved."}</p><label>{t.approvers}<textarea rows={3} value={approvers} onChange={(event) => { setApprovers(event.target.value); setNotice(""); }} /></label></details>
         <p>{t.wildcard}</p>
         {wholeAccount ? <label><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />{t.acknowledge}</label> : null}
         <button type="button" disabled={incomplete || (wholeAccount && !acknowledged)} onClick={() => run(async () => await setPolicy({ connectionId, expectedRevision: policy.revision, ...buildPolicy(rows, approvers, acknowledged) }) as ConnectionPolicy, (next) => { acceptPolicy(next); setOperations(null); setNotice(t.saved); })}>{t.save}</button>
@@ -120,7 +131,7 @@ function ScopedGovernancePanel({ companyId, connectionId, locale }: { companyId:
     })}>{t.refresh}</button>
     {operations?.length === 0 ? <p>{t.empty}</p> : null}
     {operations?.map((operation) => <article key={operation.id} style={{ border: "1px solid currentColor", padding: "0.75rem", overflowWrap: "anywhere" }}>
-      <dl><dt>ID</dt><dd>{operation.id}</dd><dt>{t.agent}</dt><dd>{operation.agentId}</dd><dt>{t.type}</dt><dd>{operation.operationType}</dd><dt>{t.resource}</dt><dd>{operation.resource}</dd><dt>{t.state}</dt><dd>{operation.state}</dd><dt>{t.expires}</dt><dd>{operation.expiresAt}</dd>
+      <dl><dt>ID</dt><dd>{operation.id}</dd><dt>{t.agent}</dt><dd>{agents.find(agent => agent.id === operation.agentId)?.name ?? (locale.startsWith("de") ? "Agentenname nicht verfügbar" : "Agent name unavailable")}</dd><dt>{t.type}</dt><dd>{permissionLabel(operation.operationType, locale)}</dd><dt>{t.resource}</dt><dd>{operation.resource}</dd><dt>{t.state}</dt><dd>{operation.state}</dd><dt>{t.expires}</dt><dd>{operation.expiresAt}</dd>
         {operation.decisionUserId ? <><dt>{t.decision}</dt><dd>{operation.decisionUserId}</dd><dt>{t.decided}</dt><dd>{operation.decidedAt}</dd></> : null}</dl>
       {operation.state === "unknown" ? <p role="alert">{t.unknown}</p> : null}
       {operation.state === "approved" ? <p>{t.approved}</p> : null}

@@ -193,8 +193,10 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
         })))}>{t.signIn}</button>
       </div>
       <details>
-        <summary>{t.existingHeading}</summary>
-        <label>{t.connectionId}<input name="m365-connection-id" autoComplete="off" spellCheck={false} aria-describedby="m365-connection-help" value={connectionId} onChange={(event) => setConnectionId(event.target.value)} /><span id="m365-connection-help" className="m365-hint">{t.connectionHelp}</span></label>
+        <summary>{locale.startsWith("de") ? "Ausgewähltes Konto verwalten" : "Manage selected account"}</summary>
+        <p>{locale.startsWith("de") ? "Wähle unten in der Kontenübersicht Verwalten." : "Choose Manage in the account overview below."}</p>
+        <details><summary>{locale.startsWith("de") ? "Technische Verbindungs-ID" : "Technical connection ID"}</summary>
+        <label>{t.connectionId}<input name="m365-connection-id" autoComplete="off" spellCheck={false} aria-describedby="m365-connection-help" value={connectionId} onChange={(event) => setConnectionId(event.target.value)} /><span id="m365-connection-help" className="m365-hint">{t.connectionHelp}</span></label></details>
         <div className="m365-actions">
           <button type="button" onClick={() => run(() => loadStatus({ connectionId }))}>{t.status}</button>
           <button type="button" disabled={!appReady} onClick={() => begin(() => reactivate({ connectionId }))}>{t.reactivate}</button>
@@ -208,7 +210,7 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
           <output>{challenge.userCode}</output>
         </section>
       ) : null}
-      {connection ? <output aria-live="polite">{connection.displayName}: {connection.status}<br />{connection.accountUsername ?? "—"}<br />{connection.tenantId ?? "—"}</output> : null}
+      {connection ? <output aria-live="polite">{connection.displayName}: {connection.status}<br />{connection.accountUsername ?? "—"}</output> : null}
       {connection?.errorCode ? <p role="alert">{connectionErrorText(connection.errorCode, locale)}</p> : null}
       </section>
       <section className="m365-section" aria-label={t.accessHeading}>

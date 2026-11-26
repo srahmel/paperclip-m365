@@ -1,3 +1,4 @@
+import { permissionLabel } from "./permission-labels.js";
 import { useEffect, useState } from "react";
 import { usePluginAction } from "@paperclipai/plugin-sdk/ui";
 import type { AccessMatrix } from "../auth/access-matrix.js";
@@ -24,7 +25,7 @@ export function AccountAccessMatrix({ companyId, locale, onSelect }: {
   const agents = data ? [...data.agents] : [];
   for (const connection of data?.connections ?? []) for (const binding of connection.bindings) {
     if (!agents.some(agent => agent.id === binding.agentId)) agents.push({ id: binding.agentId,
-      name: binding.agentId, status: de ? "Nicht aufgelöst" : "Unresolved" });
+      name: de ? "Agentenname nicht verfügbar" : "Agent name unavailable", status: de ? "Nicht aufgelöst" : "Unresolved" });
   }
   return <section className="m365-section" aria-label={de ? "Konten und Agentenzugriff" : "Accounts and agent access"}>
     <h3>{de ? "Konten und Agentenzugriff" : "Accounts and agent access"}</h3>
@@ -38,15 +39,15 @@ export function AccountAccessMatrix({ companyId, locale, onSelect }: {
         <table><caption>{de ? "Agent × Microsoft-Konto (Verbindungsrichtlinie)" : "Agent × Microsoft account (connection policy)"}</caption>
           <thead><tr><th scope="col">Agent</th>{data.connections.map(connection => <th scope="col" key={connection.id}>
             <div>{connection.username ?? (de ? "Noch nicht angemeldet" : "Not signed in")}</div>
-            <div>{connection.displayName}</div><small>{connection.status} · {connection.tenantId}</small>
+            <div>{connection.displayName}</div><small>{connection.status}</small>
             <div><button type="button" onClick={() => onSelect(connection.id)}>{de ? "Verwalten" : "Manage"}</button></div>
-            <small>{connection.id} · {de ? "Revision" : "Revision"} {connection.revision}</small>
+            <details><summary>{de ? "Technische Details" : "Technical details"}</summary><small>{connection.tenantId}<br />{connection.id}<br />Revision {connection.revision}</small></details>
           </th>)}</tr></thead>
           <tbody>{agents.map(agent => <tr key={agent.id}><th scope="row">{agent.name}<div><small>{agent.status}</small></div></th>
             {data.connections.map(connection => {
               const rules = connection.bindings.find(binding => binding.agentId === agent.id)?.rules ?? [];
               return <td key={connection.id}>{rules.length ? <details><summary>{rules.length} {de ? "Freigaben" : "grants"}</summary>
-                <ul>{rules.map((rule, index) => <li key={index}><strong>{rule.operationType}</strong><ul>{rule.resources.map(resource => <li key={resource}><code>{resource}</code></li>)}</ul></li>)}</ul>
+                <ul>{rules.map((rule, index) => <li key={index}><strong>{permissionLabel(rule.operationType, locale)}</strong><ul>{rule.resources.map(resource => <li key={resource}><code>{resource}</code></li>)}</ul></li>)}</ul>
               </details> : (de ? "Keine Freigabe" : "No grant")}</td>;
             })}</tr>)}</tbody>
         </table>
