@@ -22,6 +22,12 @@ device code in its [app configuration guide](https://learn.microsoft.com/en-us/e
 
 ## 1. Prepare the Entra registration
 
+Prerequisites: access to the correct workforce tenant and permission to manage
+the app registration; Paperclip instance-administrator access to save plugin
+configuration; and a work account with an Exchange Online mailbox and, for file
+operations, a provisioned OneDrive. This implementation targets the Microsoft
+public cloud (`login.microsoftonline.com` and `graph.microsoft.com`).
+
 1. Open [Microsoft Entra](https://entra.microsoft.com/), then **Entra ID > App
    registrations**. Reuse the existing registration if this instance already
    has one. For a new single-company registration, select accounts in this
@@ -42,6 +48,19 @@ device code in its [app configuration guide](https://learn.microsoft.com/en-us/e
    consent is required, the tenant administrator must grant it. Do not disable
    tenant security controls to make sign-in work.
 
+If consent is blocked, ask the tenant administrator to review **App registrations
+> your app > API permissions > Grant admin consent for the tenant**. If the
+corresponding **Enterprise application > Properties** requires assignment, assign
+the signing-in user under **Users and groups**. Conditional Access must permit
+device-code authentication; an administrator should inspect the failed sign-in
+record rather than disable policy. Registration, consent and user assignment are
+separate checks.
+
+This plugin accesses the signed-in account's `/me` resources. Shared-mailbox,
+application-only and arbitrary SharePoint-site access are not enabled by these
+steps. Do not add application permissions or broad `.All` scopes to resolve a
+folder binding error. See the [Graph permission reference](https://learn.microsoft.com/en-us/graph/permissions-reference).
+
 ## 2. Open the installed plugin
 
 In Paperclip, open **Settings > Plugins > Microsoft 365 > Configuration**.
@@ -54,6 +73,13 @@ it is not an Entra client secret. Create it in the host Secret Store when settin
 up a new instance, and enter only its ID here. Preserve an existing key reference:
 replacing it makes existing encrypted connection caches unreadable.
 
+For a new instance, create the secret in **Settings > Secrets** for the selected
+Paperclip company. The value must be canonical padded Base64 of exactly 32
+cryptographically random bytes (44 characters, ending in `=`), not a password or
+UUID. Generate it with a trusted local secret-generation tool, store it in the
+host Secret Store and retain its secret ID. Do not put the value in this guide,
+Git, a task, or an agent prompt. Existing installations should reuse their key.
+
 Use **Save app configuration**. The read-only pilot checkbox replaces the scope
 selection with the four read scopes above; leave it unchecked when preserving
 existing write scopes. The current UI displays configured scopes but does not
@@ -62,11 +88,59 @@ the supported authenticated host configuration API; see
 [authentication configuration](wp02-auth-connections.md). Entra permission changes
 alone do not update the plugin's requested scopes.
 
+**First-time read-only setup:** select the read-only pilot checkbox before saving;
+otherwise a new empty configuration still has no `signInScopes` and sign-in stays
+disabled. Reload configuration and verify the four scopes are displayed.
+
+### Administrator configuration for custom scopes
+
+The actual host API contract is:
+
+```text
+GET  /api/plugins/srahmel.m365/config?companyId=<PAPERCLIP_COMPANY_UUID>
+POST /api/plugins/srahmel.m365/config
+Content-Type: application/json
+```
+
+Use an authenticated Paperclip instance-administrator session or supported CLI
+credential. The Paperclip company UUID is different from the Microsoft tenant
+UUID. The POST body below is an illustrative new configuration for governed
+mail/calendar writes and read-only OneDrive; replace all placeholders:
+
+```json
+{
+  "companyId": "<PAPERCLIP_COMPANY_UUID>",
+  "configJson": {
+    "microsoftTenantId": "<ENTRA_DIRECTORY_TENANT_UUID>",
+    "microsoftClientId": "<ENTRA_APPLICATION_CLIENT_UUID>",
+    "cacheEncryptionKey": {
+      "type": "secret_ref",
+      "secretId": "<PAPERCLIP_SECRET_UUID>",
+      "version": "latest"
+    },
+    "signInScopes": [
+      "User.Read", "Mail.Read", "Mail.ReadWrite", "Mail.Send",
+      "Calendars.Read", "Calendars.ReadWrite", "Files.Read"
+    ]
+  }
+}
+```
+
+POST replaces the whole configuration object. For an existing installation,
+GET immediately before editing, preserve all existing fields and change only the
+intended values; do not submit this example over an existing configuration.
+GET again after saving to confirm persistence. Keep requested Graph scopes aligned
+with Entra consent, then reconnect the existing connection after scope changes.
+MSAL handles the protocol's identity/refresh-token scopes; `signInScopes` is the
+list of Graph permissions requested by this plugin, not a place for client secrets.
+
 ## 3. Connect or reconnect the account
 
 For an existing connection, expand **Manage an existing connection**, enter its
 existing connection ID and load it. Use its reconnect action when authentication
 has expired; do not create duplicate connections or lose existing bindings.
+The controls are **Load status** and **Sign in again** (German: **Status laden**
+and **Erneut anmelden**).
 
 For a new connection, enter a display name and tenant ID under **Connect Microsoft
 account**. Select shared use only if this connection is intended for multiple
@@ -101,3 +175,22 @@ Status `connected` confirms connection state, not every Graph permission.
 Missing tools require host access configuration; resource denial requires checking
 the explicit connection policy. `interaction_required` requires reconnecting the
 existing account. Approval remains necessary for concrete Microsoft mutations.
+
+## Troubleshooting checklist
+
+| Symptom | Check |
+| --- | --- |
+| Start sign-in is disabled | Valid tenant/client UUIDs, existing company-scoped secret reference and nonempty `signInScopes`; save and reload |
+| Configuration save returns 401/403 | Paperclip session and instance-administrator role, not Entra credentials |
+| Microsoft requests a client secret | Correct app/client ID and public-client flow enabled; this plugin does not use a client secret |
+| Administrator approval required | Tenant consent policy and delegated Graph grants |
+| User cannot access the app | Correct tenant/account, enterprise-app assignment and Entra sign-in/Conditional Access result |
+| Device code expired | Start a new attempt and use only its current code and displayed verification URL |
+| Key/cache failure | Correct company secret ID and original 32-byte Base64 key; do not replace an existing key casually |
+| Connected, but Graph read fails | Mailbox/OneDrive provisioning, granted/requested scopes and exact plugin resource grants |
+| Agent has no M365 tools | Host access profile plus plugin connection policy; installation alone is insufficient |
+
+The host requires outbound HTTPS to Microsoft's identity service and Graph.
+Device code needs no inbound callback listener, public Paperclip URL or webhook.
+The administrator's browser separately needs the verification URL returned by
+Microsoft. See [Microsoft's device-code protocol](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code).

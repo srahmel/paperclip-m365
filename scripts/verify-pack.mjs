@@ -33,6 +33,9 @@ const files = packed.files.map((file) => file.path).sort();
 const requiredFiles = [
   "LICENSE",
   "README.md",
+  "docs/setup.md",
+  "docs/wp02-auth-connections.md",
+  "docs/wp03-governed-operations.md",
   "dist/manifest.js",
   "dist/ui/index.js",
   "dist/worker.js",

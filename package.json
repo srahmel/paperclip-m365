@@ -11,6 +11,9 @@
   "files": [
     "dist",
     "migrations",
+    "docs/setup.md",
+    "docs/wp02-auth-connections.md",
+    "docs/wp03-governed-operations.md",
     "docs/runbooks/m365-operations.md",
     "docs/wp04-transport-monitoring.md",
     "docs/wp05-mail.md",
