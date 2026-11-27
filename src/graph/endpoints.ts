@@ -6,6 +6,8 @@ const routes: Record<OperationType, [GraphRequest["method"], RegExp, string]> = 
   "mail-list-folders": ["GET", new RegExp(`^/me/mailFolders(?:/${id})?$`), "Mail.Read"],
   "mail-list-messages": ["GET", new RegExp(`^/me/mailFolders/${id}/messages$`), "Mail.Read"],
   "mail-get-message": ["GET", new RegExp(`^/me/messages/${id}$`), "Mail.Read"],
+  "mail-list-attachments": ["GET", new RegExp(`^/me/messages/${id}/attachments(?:/${id})?$`), "Mail.Read"],
+  "mail-download-attachment": ["GET", new RegExp(`^/me/messages/${id}/attachments/${id}/\\$value$`), "Mail.Read"],
   "mail-create-draft": ["POST", /^\/me\/messages$/, "Mail.ReadWrite"],
   "mail-update-draft": ["PATCH", new RegExp(`^/me/messages/${id}$`), "Mail.ReadWrite"],
   "mail-create-reply-draft": ["POST", new RegExp(`^/me/messages/${id}/createReply$`), "Mail.ReadWrite"],
@@ -54,6 +56,10 @@ export function validateRequest(request: GraphRequest) {
     const start = Date.parse(request.query?.startDateTime ?? ""); const end = Date.parse(request.query?.endDateTime ?? "");
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) throw new GraphError("request_invalid");
   }
+  if (request.operationType === "mail-list-attachments" &&
+    (request.query?.["$select"] !== "id,name,contentType,size,isInline,lastModifiedDateTime" ||
+      Object.keys(request.query).some(key => !["$select", "$top"].includes(key)))) throw new GraphError("request_invalid");
+  if (request.operationType === "mail-download-attachment" && Object.keys(request.query ?? {}).length) throw new GraphError("request_invalid");
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(request.headers ?? {})) {
     const key = name.toLowerCase();

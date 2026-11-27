@@ -142,7 +142,7 @@ export class DomainRuntime {
         live.tenantId !== authority.policy.tenantId || live.homeAccountId !== authority.policy.homeAccountId) throw new GovernanceError("operation_invalidated");
     if (request) {
       authorizePolicy(live, authority.identity, request.operationType, authority.resource);
-      if (request.method !== "GET" && (!authority.snapshot || request.operationType !== authority.snapshot.operationType || authority.resource !== authority.snapshot.resource)) throw new GovernanceError("operation_forbidden");
+      if ((request.method !== "GET" || request.operationType === "mail-download-attachment") && (!authority.snapshot || request.operationType !== authority.snapshot.operationType || authority.resource !== authority.snapshot.resource)) throw new GovernanceError("operation_forbidden");
       if (request.binding.generation !== live.generation || request.binding.tenantId !== live.tenantId || request.binding.homeAccountId !== live.homeAccountId) throw new GraphError("authority_unavailable");
     }
     await authority.assertCurrent();

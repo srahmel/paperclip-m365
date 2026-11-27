@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { operationTypes, readOperationTypes, resultCodes, resultResourceKinds, resultErrorCodes, GovernanceError, type AgentBinding, type AgentIdentity, type ConnectionPolicy, type Json, type OperationType, type PublicResultSummary, type PrivateOperationResult } from "./types.js";
 
 export const MAX_SNAPSHOT_BYTES = 6 * 1024 * 1024;
+export const MAX_PRIVATE_RESULT_BYTES = 6 * 1024 * 1024;
 export const MAX_RESULT_BYTES = 64 * 1024;
 export function publicResult(value: unknown, state?: "succeeded" | "failed" | "unknown"): PublicResultSummary | null {
   if (value === null) return null;
@@ -15,13 +17,25 @@ export function publicResult(value: unknown, state?: "succeeded" | "failed" | "u
 }
 export function privateResult(value: unknown): PrivateOperationResult | null {
   if (value===null || value===undefined) return null;
-  const result = immutableJson(value,4096) as PrivateOperationResult;
+  const result = immutableJson(value,MAX_PRIVATE_RESULT_BYTES) as PrivateOperationResult;
   if (!result || typeof result!=="object" || Array.isArray(result) || Object.keys(result).length<1 ||
-      Object.keys(result).some((key)=>key!=="resourceId" && key!=="etag")) throw new GovernanceError("result_invalid");
+      Object.keys(result).some((key)=>key!=="resourceId" && key!=="etag" && key!=="attachment")) throw new GovernanceError("result_invalid");
   if (result.resourceId!==undefined && (typeof result.resourceId!=="string" ||
       !/^[A-Za-z0-9_+=.!~\/-]{1,1024}$/.test(result.resourceId) || result.resourceId.startsWith("//"))) throw new GovernanceError("result_invalid");
   if (result.etag!==undefined && (typeof result.etag!=="string" || result.etag.length>1024 ||
       !/^(?:W\/)?"[\x21\x23-\x7e]+"$/.test(result.etag) || result.etag.includes("://"))) throw new GovernanceError("result_invalid");
+  if (result.attachment !== undefined) {
+    const file = result.attachment;
+    if (Object.keys(result).length !== 1 || !file || typeof file !== "object" || Array.isArray(file) ||
+      Object.keys(file).sort().join(",") !== "contentBase64,contentType,name,sha256,size" ||
+      typeof file.name !== "string" || !file.name || file.name.length > 255 || /[\\/\x00-\x1f\x7f]/.test(file.name) || [".",".."].includes(file.name) ||
+      typeof file.contentType !== "string" || !/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(file.contentType) || file.contentType.length > 127 ||
+      !Number.isSafeInteger(file.size) || file.size < 0 || file.size > 4 * 1024 * 1024 ||
+      typeof file.contentBase64 !== "string" || file.contentBase64.length > 5592408 ||
+      typeof file.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(file.sha256)) throw new GovernanceError("result_invalid");
+    const bytes = Buffer.from(file.contentBase64,"base64");
+    if (bytes.length !== file.size || bytes.toString("base64") !== file.contentBase64 || createHash("sha256").update(bytes).digest("hex") !== file.sha256) throw new GovernanceError("result_invalid");
+  } else if (Buffer.byteLength(canonicalJson(result), "utf8") > 4096) throw new GovernanceError("result_invalid");
   return result;
 }
 const allTypes = new Set<string>(operationTypes);
@@ -134,5 +148,5 @@ export function authorizePolicy(policy: ConnectionPolicy, identity: AgentIdentit
   if (policy.companyId !== identity.companyId || policy.status !== "connected" ||
       !Number.isSafeInteger(policy.revision) || policy.revision < 1 || !Number.isSafeInteger(policy.generation) || policy.generation < 1) throw new GovernanceError("connection_unavailable");
   const binding = policy.bindings.find((item) => item.agentId === identity.agentId);
-  if (!binding?.rules.some((rule) => rule.operationType === operationType && (rule.resources.includes(resource) || rule.resources.includes("*")))) throw new GovernanceError("operation_forbidden");
+  if (!binding?.rules.some((rule) => (rule.operationType === operationType || (["mail-list-attachments", "mail-download-attachment"].includes(operationType) && rule.operationType === "mail-get-message")) && (rule.resources.includes(resource) || rule.resources.includes("*")))) throw new GovernanceError("operation_forbidden");
 }

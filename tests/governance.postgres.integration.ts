@@ -389,3 +389,18 @@ test("private expiry and metadata redaction preserve non-replayable minimal tomb
   assert.equal(await store.finish({...claim,state:"succeeded",result:null}),false);
   assert.equal(await store.invalidate({companyId,operationId:op.id,userId,correlationId:randomUUID()}),false);
 });
+
+
+test("attachment download inherits only the same mail folder and still requires human approval", async () => {
+  const old = await fixture();
+  assert.equal(await store.setPolicy({ companyId, connectionId: old.connectionId!, expectedRevision: 1,
+    bindings: [{ agentId, rules: [{ operationType: "mail-get-message", resources: ["folder-a"] }] }], approverUserIds: [userId], actorId: userId }), true);
+  const op = { ...old, id: randomUUID(), operationType: "mail-download-attachment" as const, policyRevision: 2 };
+  assert.equal(await store.insertOperation({ ...op, id: randomUUID(), resource: "foreign-folder" }), false);
+  assert.equal(await store.insertOperation(op), true);
+  assert.equal(await store.reserve(reservation(op)), false);
+  assert.equal(await store.decide(decision(op)), true);
+  const claim = reservation(op);
+  assert.equal(await store.reserve(claim), true);
+  assert.equal(await store.finish({ ...claim, state: "succeeded", result: null }), true);
+});

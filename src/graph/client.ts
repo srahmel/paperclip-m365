@@ -81,7 +81,7 @@ export class GraphClient {
 
   async request<T = unknown>(input: GraphRequest, signal?: AbortSignal): Promise<GraphResult<T>> {
     return this.#withinDeadline(input, signal, async (request, active, deadline) => {
-      if (request.operationType === "drive-read-content") throw new GraphError("request_invalid");
+      if (["drive-read-content", "mail-download-attachment"].includes(request.operationType)) throw new GraphError("request_invalid");
       const validated = validateRequest(request); const key = fingerprint(request);
       this.#sweep();
       let url = validated.url; let page = 1; let seen = [url];
@@ -128,12 +128,13 @@ export class GraphClient {
 
   async download(input: GraphRequest, signal?: AbortSignal): Promise<Uint8Array> {
     return this.#withinDeadline(input, signal, async (request, active, deadline) => {
-      if (request.operationType !== "drive-read-content" || request.continuation !== undefined) throw new GraphError("request_invalid");
+      if (!["drive-read-content", "mail-download-attachment"].includes(request.operationType) || request.continuation !== undefined) throw new GraphError("request_invalid");
       const validated = validateRequest(request);
       let { response } = await this.#send(request, validated, validated.url, active, deadline, FILE_LIMIT);
       const seen = new Set<string>();
       for (let redirects = 0; response.status >= 300 && response.status < 400; redirects++) {
         if (redirects >= 3 || ![301, 302, 303, 307, 308].includes(response.status)) throw new GraphError("redirect_denied");
+        if (request.operationType === "mail-download-attachment") throw new GraphError("redirect_denied");
         const target = response.headers.location;
         let url: URL; try { url = safeHttpsUrl(target ?? ""); } catch { throw new GraphError("redirect_denied"); }
         if (!this.#downloadHosts.has(url.hostname) || seen.has(url.href) || url.origin === GRAPH_ORIGIN) throw new GraphError("redirect_denied");

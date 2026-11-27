@@ -39,6 +39,16 @@ function fixture(now?: () => number) {
   return { harness, policy, token, send, runtime, module, snapshot, getPolicy };
 }
 describe("domain authority boundary", () => {
+  it("blocks attachment GET downloads outside a human-approved execution reservation", async () => {
+    const f = fixture();
+    f.module.read = async (_name, _input, ctx) => {
+      await ctx.download("mail-folder:inbox", { operationType: "mail-download-attachment", method: "GET", path: "/me/messages/message/attachments/file/$value" });
+      return null;
+    };
+    expect(await f.harness.executeTool("mail-get-message", { connectionId }, identity)).toHaveProperty("error");
+    expect(f.token).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
   it("blocks missing host identity and missing resource grants before token or HTTP", async () => {
     const f = fixture();
     expect(await f.harness.executeTool("mail-get-message", { connectionId, ...identity }, { ...identity, runId: "" })).toHaveProperty("error");

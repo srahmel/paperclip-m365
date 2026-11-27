@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { GovernanceService, governanceFailureSignal, type GovernanceExecutor, type GovernanceObserver } from "../src/governance/governance-service.js";
 import { GovernanceError } from "../src/governance/types.js";
@@ -581,5 +582,25 @@ describe("GovernanceService", () => {
     f.policy.bindings = [];
     await expect(f.service.status({ identity, operationId: op.id })).rejects.toThrow("operation_forbidden");
     expect(await f.service.list({ companyId: "company-b" })).toEqual([]);
+  });
+});
+
+
+describe("attachment result approval and confidentiality", () => {
+  it("requires human approval and keeps file bytes encrypted and owner-scoped", async () => {
+    const bytes = Buffer.alloc(4 * 1024 * 1024, 7);
+    const attachment = { name: "offer.pdf", contentType: "application/pdf", size: bytes.length, contentBase64: bytes.toString("base64"), sha256: createHash("sha256").update(bytes).digest("hex") };
+    const executor = vi.fn(async () => ({ state: "succeeded" as const, result: null, privateResult: { attachment } }));
+    const f = fixture(executor);
+    f.policy.bindings[0]!.rules.push({ operationType: "mail-download-attachment", resources: ["mailbox-a"] });
+    const op = await f.service.prepare({ ...request, operationType: "mail-download-attachment" });
+    await expect(f.service.execute({ companyId: identity.companyId, operationId: op.id })).rejects.toThrow();
+    expect(executor).not.toHaveBeenCalled();
+    await f.approve(op.id, op.snapshotHash);
+    await f.service.execute({ companyId: identity.companyId, operationId: op.id });
+    expect(JSON.stringify(f.operations.get(op.id))).not.toContain(attachment.contentBase64);
+    expect(JSON.stringify(await f.service.getResult({ identity, operationId: op.id }))).toContain(attachment.contentBase64);
+    await expect(f.service.getResult({ identity: { ...identity, agentId: "other-agent" }, operationId: op.id })).rejects.toThrow();
+    expect(JSON.stringify(await f.service.list({ companyId: identity.companyId }))).not.toContain(attachment.contentBase64);
   });
 });

@@ -3,6 +3,8 @@ const labels: Record<OperationType, [string, string]> = {
   "mail-list-folders": ["Browse mail folders", "Mailordner anzeigen"],
   "mail-list-messages": ["List emails", "E-Mails auflisten"],
   "mail-get-message": ["Read emails", "E-Mails lesen"],
+  "mail-list-attachments": ["List attachment names", "Anhangsnamen anzeigen"],
+  "mail-download-attachment": ["Download attachment on human request", "Anhang auf Benutzeraufforderung herunterladen"],
   "mail-create-draft": ["Create drafts", "Entwürfe erstellen"],
   "mail-update-draft": ["Edit drafts", "Entwürfe bearbeiten"],
   "mail-create-reply-draft": ["Draft replies", "Antworten entwerfen"],

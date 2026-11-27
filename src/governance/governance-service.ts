@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Component, SignalEvent } from "../telemetry/types.js";
 import type { ConnectionPolicy } from "./types.js";
 import { ConnectionAccessError, MicrosoftAuthError, decryptCache, encryptCache } from "../auth/connection-manager.js";
-import { authorizePolicy, canonicalJson, immutableJson, MAX_RESULT_BYTES, publicResult, privateResult, requireId, requireIdentity, requireOperationType, requireResource, validatePolicy } from "./policy.js";
+import { authorizePolicy, canonicalJson, immutableJson, MAX_RESULT_BYTES, MAX_PRIVATE_RESULT_BYTES, publicResult, privateResult, requireId, requireIdentity, requireOperationType, requireResource, validatePolicy } from "./policy.js";
 import { GovernanceError, type AgentBinding, type AgentIdentity, type GovernanceStore, type Json, type KeyResolver, type OperationRecord, type FullOperationRecord, type PublicResultSummary, type PrivateOperationResult, type OperationSnapshot, type OperationType } from "./types.js";
 
 export type GovernanceExecutor = (snapshot: Readonly<OperationSnapshot>, assertCurrent: () => Promise<void>) => Promise<{ state: "succeeded" | "failed" | "unknown"; result: PublicResultSummary | null; privateResult?: PrivateOperationResult | null }>;
@@ -171,9 +171,10 @@ export class GovernanceService {
       if (!["succeeded", "failed", "unknown"].includes(outcome.state)) throw new Error("invalid outcome");
       result = publicResult(outcome.result, outcome.state);
       const privateData = privateResult(outcome.privateResult);
+      if (privateData?.attachment && record.operationType !== "mail-download-attachment") throw new GovernanceError("result_invalid");
       if (privateData) {
         const key = await this.#key(record.companyId);
-        privateResultEnvelope = encryptCache(canonicalJson(privateData,4096),key,record.companyId,`result:${record.id}`);
+        privateResultEnvelope = encryptCache(canonicalJson(privateData,MAX_PRIVATE_RESULT_BYTES),key,record.companyId,`result:${record.id}`);
         const metadataLifetime = Date.parse(record.metadataPurgeAfter) - Date.parse(record.createdAt);
         privateResultExpiresAt = new Date(this.#now().getTime() + Math.min(this.#privateResultTtlMs, metadataLifetime)).toISOString();
       }
@@ -220,7 +221,7 @@ export class GovernanceService {
     const current = await this.#find(input.identity.companyId,input.operationId);
     await check(current);
     if (current.snapshotHash !== record.snapshotHash || current.privateResultExpiresAt !== record.privateResultExpiresAt ||
-        canonicalJson(current.privateResultEnvelope,8192) !== canonicalJson(record.privateResultEnvelope,8192)) throw new GovernanceError("result_unavailable");
+        canonicalJson(current.privateResultEnvelope,2 * MAX_PRIVATE_RESULT_BYTES) !== canonicalJson(record.privateResultEnvelope,2 * MAX_PRIVATE_RESULT_BYTES)) throw new GovernanceError("result_unavailable");
     return { operationId: current.id,result: publicResult(current.result),privateResult: data };
   }
 

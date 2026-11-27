@@ -29,8 +29,8 @@ function snapshot(change: PreparedChange): OperationSnapshot {
 const mutations = (f: ReturnType<typeof fixture>) => f.request.mock.calls.filter(([, input]) => input.method !== "GET");
 
 describe("mail domain closed read contracts", () => {
-  it("declares three reads and five prepare tools with closed nested schemas", () => {
-    expect(module.tools).toHaveLength(8);
+  it("declares four reads and six prepare tools with closed nested schemas", () => {
+    expect(module.tools).toHaveLength(10);
     for (const tool of module.tools) expect(tool.parametersSchema.additionalProperties).toBe(false);
     const schema = module.tools.find((tool) => tool.name === "mail-prepare-send")!.parametersSchema as { properties: { message: { additionalProperties: boolean } } };
     expect(schema.properties.message.additionalProperties).toBe(false);
@@ -141,5 +141,53 @@ describe("mail prepare and reserved execution", () => {
     const f = fixture(); const prepared = await module.prepare("mail-prepare-send", { connectionId: "connection", message }, f.ctx);
     expect(await module.execute({ ...snapshot(prepared), resource: "mailbox:foreign" }, f.ctx)).toMatchObject({ state: "failed" });
     expect(await module.execute({ ...snapshot(prepared), payload: { ...(prepared.payload as object), url: "https://foreign.test" } }, f.ctx)).toMatchObject({ state: "failed" }); expect(f.request).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("explicitly requested attachment downloads", () => {
+  const file = { id: "file-A", name: "offer.pdf", contentType: "application/pdf", size: 3, isInline: false, "@odata.type": "#microsoft.graph.fileAttachment" };
+  const input = { connectionId: "connection", folderId: "inbox-A", messageId: "message-A", attachmentId: "file-A" };
+  function attachments() {
+    const f = fixture();
+    f.request.mockImplementation(async (_resource, request) => ({ status: 200, complete: true, requestId: "x", data:
+      request.path.endsWith("/attachments") ? { value: [{ ...file, contentBytes: "SECRET" }] } :
+      request.path.endsWith("/attachments/file-A") ? file : { ...meta, subject: "Offer" } }));
+    const download = vi.fn(async () => Buffer.from("abc"));
+    f.ctx.download = download;
+    return { ...f, download };
+  }
+  it("lists metadata without fetching or exposing bytes", async () => {
+    const f = attachments();
+    const { attachmentId: _, ...list } = input;
+    const result = await module.read("mail-list-attachments", list, f.ctx);
+    expect(JSON.stringify(result)).not.toContain("SECRET");
+    expect(f.download).not.toHaveBeenCalled();
+    expect(f.request.mock.calls.find(([, r]) => r.path.endsWith("/attachments"))![1].query?.$select).not.toContain("contentBytes");
+  });
+  it("prepares no bytes and releases downloaded content only as a private result", async () => {
+    const f = attachments();
+    const prepared = await module.prepare("mail-prepare-download-attachment", input, f.ctx);
+    expect(f.download).not.toHaveBeenCalled();
+    const result = await module.execute(snapshot(prepared), f.ctx);
+    expect(result).toMatchObject({ state: "succeeded", privateResult: { attachment: { name: "offer.pdf", contentBase64: "YWJj", size: 3 } } });
+    expect(JSON.stringify(result.result)).not.toContain("YWJj");
+    expect(f.download).toHaveBeenCalledOnce();
+  });
+  it("rejects agent-asserted approval and foreign folders before download", async () => {
+    const f = attachments();
+    await expect(module.prepare("mail-prepare-download-attachment", { ...input, userRequested: true }, f.ctx)).rejects.toThrow();
+    await expect(module.prepare("mail-prepare-download-attachment", { ...input, folderId: "foreign" }, f.ctx)).rejects.toThrow();
+    expect(f.download).not.toHaveBeenCalled();
+  });
+  it("discards bytes when the message changes during download", async () => {
+    const f = attachments();
+    const prepared = await module.prepare("mail-prepare-download-attachment", input, f.ctx);
+    f.download.mockImplementation(async () => {
+      f.request.mockResolvedValue({ status: 200, complete: true, requestId: "x", data: { ...meta, changeKey: "changed" } });
+      return Buffer.from("abc");
+    });
+    const result = await module.execute(snapshot(prepared), f.ctx);
+    expect(result.state).toBe("failed"); expect(result.privateResult).toBeUndefined();
   });
 });

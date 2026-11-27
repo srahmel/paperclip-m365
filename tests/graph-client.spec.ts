@@ -43,6 +43,7 @@ describe("Graph endpoint boundary", () => {
   it("covers every declared operation with only its documented method and own-account route", () => {
     const matrix: Array<[GraphRequest["operationType"], GraphRequest["method"], string]> = [
       ["mail-list-folders", "GET", "/me/mailFolders"], ["mail-list-messages", "GET", "/me/mailFolders/f/messages"],
+      ["mail-list-attachments", "GET", "/me/messages/m/attachments"], ["mail-download-attachment", "GET", "/me/messages/m/attachments/a/$value"],
       ["mail-get-message", "GET", "/me/messages/m"], ["mail-create-draft", "POST", "/me/messages"],
       ["mail-update-draft", "PATCH", "/me/messages/m"], ["mail-create-reply-draft", "POST", "/me/messages/m/createReply"],
       ["mail-send", "POST", "/me/sendMail"], ["mail-delete", "DELETE", "/me/messages/m"],
@@ -57,6 +58,7 @@ describe("Graph endpoint boundary", () => {
     expect(matrix.map(([operation]) => operation).sort()).toEqual([...operationTypes].sort());
     for (const [operationType, method, path] of matrix) {
       const input: GraphRequest = { binding, operationType, method, path,
+        ...(operationType === "mail-list-attachments" ? { query: { $select: "id,name,contentType,size,isInline,lastModifiedDateTime" } } : {}),
         ...(method === "GET" || method === "DELETE" ? {} : { body: method === "PUT" ? new Uint8Array([1]) : {} }),
         ...(method === "GET" ? {} : { headers: { "If-Match": '"synthetic-etag"' } }),
         ...(operationType === "calendar-list-events" ? { query: { startDateTime: "2026-11-01T00:00:00Z", endDateTime: "2026-12-01T00:00:00Z" } } : {}),
@@ -265,5 +267,20 @@ describe("opaque pagination and download boundaries", () => {
     await expect(c.client.download(download)).rejects.toMatchObject({ code: "size_limit" });
     const d = setup({ downloadHosts: ["download.example.test"] }); d.send.mockResolvedValue(response(302, {}, { location: "https://download.example.test/file" })); d.authorize.mockResolvedValueOnce("synthetic").mockRejectedValueOnce(new Error("revoked"));
     await expect(d.client.download(download)).rejects.toMatchObject({ code: "authority_unavailable" }); expect(d.send).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("attachment transport", () => {
+  const attachment: GraphRequest = { binding, operationType: "mail-download-attachment", method: "GET", path: "/me/messages/m/attachments/a/$value" };
+  it("prevents JSON reads from bypassing the download boundary", async () => {
+    const f = setup(); await expect(f.client.request(attachment)).rejects.toThrow(); expect(f.send).not.toHaveBeenCalled();
+  });
+  it("rejects redirects without forwarding the bearer or following the location", async () => {
+    const f = setup(); f.send.mockResolvedValue(response(302, null, { location: "https://evil.test/attachment" }));
+    await expect(f.client.download(attachment)).rejects.toThrow("redirect_denied"); expect(f.send).toHaveBeenCalledOnce();
+  });
+  it("rejects attachment metadata queries that request file content", () => {
+    expect(() => validateRequest({ ...attachment, operationType: "mail-list-attachments", path: "/me/messages/m/attachments", query: { $select: "id,contentBytes" } })).toThrow();
   });
 });

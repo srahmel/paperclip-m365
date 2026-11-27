@@ -1,7 +1,7 @@
 import type { CacheKey, EncryptedCache } from "../auth/connection-manager.js";
 
 export const operationTypes = [
-  "mail-list-folders", "mail-list-messages", "mail-get-message",
+  "mail-list-folders", "mail-list-messages", "mail-get-message", "mail-list-attachments", "mail-download-attachment",
   "mail-create-draft", "mail-update-draft", "mail-create-reply-draft", "mail-send", "mail-delete",
   "calendar-list-calendars", "calendar-list-events", "calendar-get-event",
   "calendar-create-event", "calendar-update-event", "calendar-delete-event",
@@ -10,7 +10,7 @@ export const operationTypes = [
 ] as const;
 export type OperationType = typeof operationTypes[number];
 export const readOperationTypes: ReadonlySet<OperationType> = new Set([
-  "mail-list-folders", "mail-list-messages", "mail-get-message", "calendar-list-calendars",
+  "mail-list-folders", "mail-list-messages", "mail-get-message", "mail-list-attachments", "calendar-list-calendars",
   "calendar-list-events", "calendar-get-event", "drive-list-children", "drive-get-item", "drive-read-content",
 ]);
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -38,7 +38,7 @@ export interface PublicResultSummary {
   resourceKind: typeof resultResourceKinds[number];
   errorCode: typeof resultErrorCodes[number] | null;
 }
-export interface PrivateOperationResult { resourceId?: string; etag?: string }
+export interface PrivateOperationResult { resourceId?: string; etag?: string; attachment?: { name: string; contentType: string; size: number; sha256: string; contentBase64: string } }
 export interface OperationRecord {
   id: string; companyId: string; connectionId: string | null; agentId: string | null; runId: string | null; projectId: string | null;
   operationType: OperationType; resource: string | null; policyRevision: number | null; connectionGeneration: number | null;

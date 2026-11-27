@@ -44,10 +44,12 @@ export class SqlGovernanceStore implements GovernanceStore {
   }
 
   #permission(connection: string, operation: string): string {
-    const rule = (resource: string) => `${connection}.policy_bindings @> jsonb_build_array(jsonb_build_object(
+    const rule = (resource: string, operationType = `${operation}.operation_type`) => `${connection}.policy_bindings @> jsonb_build_array(jsonb_build_object(
       'agentId',${operation}.agent_id::text,'rules',jsonb_build_array(jsonb_build_object(
-        'operationType',${operation}.operation_type,'resources',jsonb_build_array(${resource})))))`;
-    return `(${rule(`${operation}.resource`)} OR ${rule("'*'::text")})`;
+        'operationType',${operationType},'resources',jsonb_build_array(${resource})))))`;
+    return `(${rule(`${operation}.resource`)} OR ${rule("'*'::text")} OR
+      (${operation}.operation_type IN ('mail-list-attachments','mail-download-attachment') AND
+        (${rule(`${operation}.resource`, "'mail-get-message'::text")} OR ${rule("'*'::text", "'mail-get-message'::text")})))`;
   }
 
   #authority(extra = ""): string {
@@ -74,10 +76,14 @@ export class SqlGovernanceStore implements GovernanceStore {
         AND authority.policy_revision=$9 AND authority.generation=$10
         AND authority.tenant_id=$17::uuid AND authority.home_account_id=$18::text
         AND $13::timestamptz>now() AND $12::text::jsonb IS NOT NULL
-        AND (authority.policy_bindings @> $15::text::jsonb OR authority.policy_bindings @> $16::text::jsonb)
+        AND (authority.policy_bindings @> $15::text::jsonb OR authority.policy_bindings @> $16::text::jsonb OR
+          ($7::text IN ('mail-list-attachments','mail-download-attachment') AND
+            (authority.policy_bindings @> $20::text::jsonb OR authority.policy_bindings @> $21::text::jsonb)))
       FOR UPDATE OF authority`, [record.companyId,record.id,record.connectionId,record.agentId,record.runId,record.projectId,
       record.operationType,record.resource,record.policyRevision,record.connectionGeneration,record.snapshotHash,
-      JSON.stringify(record.envelope),record.expiresAt,record.createdAt,permission,wildcard,record.tenantId,record.homeAccountId,record.metadataPurgeAfter]) === 1;
+      JSON.stringify(record.envelope),record.expiresAt,record.createdAt,permission,wildcard,record.tenantId,record.homeAccountId,record.metadataPurgeAfter,
+        JSON.stringify([{agentId:record.agentId,rules:[{operationType:"mail-get-message",resources:[record.resource]}]}]),
+        JSON.stringify([{agentId:record.agentId,rules:[{operationType:"mail-get-message",resources:["*"]}]}])]) === 1;
   }
 
   async findOperation(companyId: string, operationId: string): Promise<OperationRecord | null> {

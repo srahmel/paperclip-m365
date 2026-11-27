@@ -5,8 +5,8 @@ export type AccountAccess = "none" | "read" | "write";
 // Profiles use the account's approved envelope, never inferred resource wildcards.
 export function profileRules(envelope: PermissionRule[], level: AccountAccess): PermissionRule[] {
   if (level === "none") return [];
-  const rules = envelope.filter(rule => level === "write" || readOperationTypes.has(rule.operationType));
-  if (!rules.length || (level === "write" && !rules.some(rule => !readOperationTypes.has(rule.operationType)))) {
+  const rules = envelope.filter(rule => level === "write" || (readOperationTypes.has(rule.operationType) || rule.operationType === "mail-download-attachment"));
+  if (!rules.length || (level === "write" && !rules.some(rule => !(readOperationTypes.has(rule.operationType) || rule.operationType === "mail-download-attachment")))) {
     throw new GovernanceError("account_setup_required");
   }
   return structuredClone(rules);
