@@ -29,8 +29,8 @@ function snapshot(change: PreparedChange): OperationSnapshot {
 const mutations = (f: ReturnType<typeof fixture>) => f.request.mock.calls.filter(([, input]) => input.method !== "GET");
 
 describe("mail domain closed read contracts", () => {
-  it("declares four reads and six prepare tools with closed nested schemas", () => {
-    expect(module.tools).toHaveLength(10);
+  it("declares attachment download and legacy tools with closed nested schemas", () => {
+    expect(module.tools).toHaveLength(11);
     for (const tool of module.tools) expect(tool.parametersSchema.additionalProperties).toBe(false);
     const schema = module.tools.find((tool) => tool.name === "mail-prepare-send")!.parametersSchema as { properties: { message: { additionalProperties: boolean } } };
     expect(schema.properties.message.additionalProperties).toBe(false);

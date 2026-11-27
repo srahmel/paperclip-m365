@@ -4,7 +4,7 @@ import { GraphClient } from "../graph/client.js";
 import { NodeHttpsTransport } from "../graph/node-http.js";
 import { GraphError, type GraphRequest, type HttpTransport } from "../graph/types.js";
 import type { GovernanceExecutor, GovernanceObserver, GovernanceService } from "../governance/governance-service.js";
-import { authorizePolicy, immutableJson, requireId } from "../governance/policy.js";
+import { authorizePolicy, immutableJson, privateResult, requireId } from "../governance/policy.js";
 import { agentIdentity } from "../governance/runtime.js";
 import { GovernanceError, type AgentIdentity, type ConnectionPolicy, type OperationSnapshot } from "../governance/types.js";
 import type { ConnectionManager } from "../auth/connection-manager.js";
@@ -221,6 +221,24 @@ export class DomainRuntime {
           const policy = await this.input.service().getPolicy(identity.companyId, connectionId);
           this.#guard();
           const context = this.#context({ identity, connectionId, policy, assertCurrent: async () => {} });
+          if (["mail-download-attachment", "mail-prepare-download-attachment"].includes(tool.name)) {
+            // This read is requested by the user through the agent, like other mail reads.
+            // The tool contract forbids autonomous downloads; tool arguments cannot grant access.
+            const prepared = await module.prepare("mail-prepare-download-attachment", params, context);
+            await context.assertCurrent();
+            if (!policy.tenantId || !policy.homeAccountId) throw new GovernanceError("connection_unavailable");
+            const snapshot: OperationSnapshot = { schemaVersion: 1, ...identity, connectionId, ...prepared,
+              policyRevision: policy.revision, connectionGeneration: policy.generation,
+              tenantId: policy.tenantId, homeAccountId: policy.homeAccountId,
+              expiresAt: new Date((this.input.now ?? Date.now)() + 120_000).toISOString() };
+            const downloadContext = this.#context({ identity, connectionId, policy, snapshot, assertCurrent: async () => {} });
+            const outcome = await module.execute(snapshot, downloadContext);
+            await downloadContext.assertCurrent();
+            if (outcome.state !== "succeeded") return { error: outcome.result?.errorCode ?? "domain_unavailable" };
+            const result = privateResult(outcome.privateResult);
+            if (!result?.attachment) throw new GovernanceError("result_invalid");
+            return { data: { attachment: result.attachment } };
+          }
           if (tool.name.includes("-prepare-")) {
             const prepared = await module.prepare(tool.name, params, context);
             await context.assertCurrent();

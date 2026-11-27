@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import type { Agent } from "@paperclipai/shared";
@@ -15,7 +16,7 @@ const connectionId = "22222222-2222-4222-8222-222222222222";
 const identity = { companyId, agentId, runId: "44444444-4444-4444-8444-444444444444", projectId: "55555555-5555-4555-8555-555555555555" };
 const runtimes: DomainRuntime[] = [];
 afterEach(() => runtimes.splice(0).forEach(runtime => runtime.dispose()));
-function fixture(now?: () => number) {
+function fixture(now?: () => number, toolName = "mail-get-message") {
   const harness = createTestHarness({ manifest });
   vi.spyOn(harness.ctx.agents, "get").mockImplementation(async (id, company) => ({ id, companyId: company, status: "idle" } as Agent));
   const policy: ConnectionPolicy = { companyId, connectionId, revision: 1, generation: 1, status: "connected", shareable: true,
@@ -25,7 +26,7 @@ function fixture(now?: () => number) {
   const getPolicy = vi.fn(async () => structuredClone(policy));
   const token = vi.fn(async () => "synthetic-token");
   const send = vi.fn(async (_request: HttpRequest) => ({ status: 200, headers: {}, body: Buffer.from('{"id":"synthetic"}') }));
-  const module: DomainModule = { tools: [{ name: "mail-get-message", displayName: "Synthetic read", description: "Synthetic", parametersSchema: { type: "object" } }],
+  const module: DomainModule = { tools: [{ name: toolName, displayName: "Synthetic read", description: "Synthetic", parametersSchema: { type: "object" } }],
     read: async (_name, _input, ctx) => (await ctx.request("mail-folder:inbox", { operationType: "mail-get-message", method: "GET", path: "/me/messages/m" })).data,
     prepare: async () => { throw new Error("unused"); },
     execute: async (_snapshot, ctx) => { await ctx.request("mailbox:self", { operationType: "mail-send", method: "POST", path: "/me/sendMail", body: { message: {} } }); return { state: "succeeded", result: null }; },
@@ -225,5 +226,23 @@ describe("whole-domain execution deadline", () => {
       resolveDomain(); await vi.advanceTimersByTimeAsync(0);
       expect(f.runtime.dispose()).toEqual({ pendingOperations: 0 });
     } finally { vi.useRealTimers(); }
+  });
+});
+
+
+describe("user-requested attachment reads", () => {
+  it.each(["mail-download-attachment", "mail-prepare-download-attachment"])("%s returns the file without creating a second approval operation", async toolName => {
+    const f = fixture(undefined, toolName);
+    f.module.prepare = async () => ({ operationType: "mail-download-attachment", resource: "mail-folder:inbox", payload: {} });
+    f.module.execute = async (_snapshot, ctx) => {
+      const bytes = await ctx.download("mail-folder:inbox", { operationType: "mail-download-attachment", method: "GET", path: "/me/messages/m/attachments/a/$value" });
+      return { state: "succeeded", result: null, privateResult: { attachment: { name: "offer.txt", contentType: "text/plain", size: bytes.length, contentBase64: Buffer.from(bytes).toString("base64"), sha256: createHash("sha256").update(bytes).digest("hex") } } };
+    };
+    f.send.mockResolvedValue({ status: 200, headers: {}, body: Buffer.from("requested file") });
+    expect(await f.harness.executeTool(toolName, { connectionId }, identity)).toMatchObject({ data: { attachment: { name: "offer.txt", contentBase64: Buffer.from("requested file").toString("base64") } } });
+    expect(f.send).toHaveBeenCalledOnce();
+    f.policy.bindings = [];
+    expect(await f.harness.executeTool(toolName, { connectionId }, identity)).toHaveProperty("error");
+    expect(f.send).toHaveBeenCalledOnce();
   });
 });
